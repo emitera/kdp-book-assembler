@@ -18,7 +18,23 @@ const app = new Hono<{ Bindings: Bindings }>();
 
 // Enable CORS for frontend requests
 app.use('/*', cors({
-  origin: '*', // Allow all origins for dev simplicity
+  origin: (origin) => {
+    const allowed = [
+      'https://birdypages.io',
+      'https://www.birdypages.io',
+      'https://kdp-smart-assembler.pages.dev',
+      'http://localhost:5173',
+      'http://localhost:3000'
+    ];
+    if (allowed.includes(origin) || !origin) {
+      return origin;
+    }
+    // Check if it's a Cloudflare Pages preview deployment
+    if (origin.endsWith('.kdp-smart-assembler.pages.dev')) {
+      return origin;
+    }
+    return 'https://birdypages.io';
+  },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowHeaders: ['Content-Type', 'Authorization'],
   exposeHeaders: ['Content-Length'],
