@@ -7,6 +7,7 @@ export default function ImageValidationModal({ isOpen, validationData, onClose }
   const { t } = useTranslation();
   const { unit } = useApp();
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   if (!isOpen || !validationData) return null;
 
@@ -87,8 +88,11 @@ export default function ImageValidationModal({ isOpen, validationData, onClose }
           <button
             onClick={handleOptimizeClick}
             disabled={isProcessing}
+            onMouseEnter={() => setIsHovered(true)}
+            onMouseLeave={() => setIsHovered(false)}
             type="button"
-            className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="flex-1 py-3 px-4 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer border border-transparent"
+            style={{ backgroundColor: isHovered ? '#4338ca' : '#4f46e5' }}
           >
             {isProcessing ? (
               <Loader2 className="w-4 h-4 animate-spin" />
