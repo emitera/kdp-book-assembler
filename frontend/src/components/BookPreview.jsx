@@ -5,6 +5,43 @@ import { useTranslation } from 'react-i18next';
 import { calculateSpineWidth, calculateCoverDimensions, inchesToPoints } from '../utils/kdpMath';
 import { Eye, BookOpen, AlertTriangle, Layers, Book, Move, Sliders, Check, Lock, RotateCcw } from 'lucide-react';
 
+const InputField = ({ value, onChange, min, max, step }) => {
+  const [localVal, setLocalVal] = useState(value);
+  
+  useEffect(() => {
+    setLocalVal(value);
+  }, [value]);
+
+  const handleSubmit = () => {
+    let numVal = parseFloat(localVal);
+    if (!isNaN(numVal)) {
+      numVal = Math.max(min, Math.min(max, numVal));
+      onChange(numVal);
+    } else {
+      setLocalVal(value);
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      step={step}
+      min={min}
+      max={max}
+      value={localVal}
+      onChange={(e) => setLocalVal(e.target.value)}
+      onBlur={handleSubmit}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') {
+          handleSubmit();
+          e.currentTarget.blur();
+        }
+      }}
+      className="w-16 text-right px-1.5 py-0.5 bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-750 rounded text-xs font-mono focus:outline-none focus:border-indigo-500"
+    />
+  );
+};
+
 export default function BookPreview() {
   const { t } = useTranslation();
   const {
@@ -241,15 +278,17 @@ export default function BookPreview() {
     }
   }
 
-  const handleScaleChange = (type, value) => {
-    const numericVal = parseFloat(value);
-    const updates = {};
-    
-    if (type === 'xScale') {
-      updates.xScale = numericVal;
-    } else if (type === 'yScale') {
-      updates.yScale = numericVal;
+  const handlePropChange = (key, value) => {
+    let numVal = parseFloat(value);
+    if (isNaN(numVal)) return;
+
+    if (key === 'xScale' || key === 'yScale') {
+      numVal = Math.max(0.1, Math.min(5.0, numVal));
+    } else if (key === 'xOffset' || key === 'yOffset') {
+      numVal = Math.max(-2000, Math.min(2000, numVal));
     }
+
+    const updates = { [key]: numVal };
 
     if (activeTab === 'cover') {
       if (selectedElement === 'front') {
@@ -262,6 +301,10 @@ export default function BookPreview() {
     } else if (activeTab === 'interior2d' && selectedPageId) {
       updatePageTransform(selectedPageId, updates);
     }
+  };
+
+  const handleScaleChange = (type, value) => {
+    handlePropChange(type, value);
   };
 
   const resetActiveTransform = () => {
@@ -303,8 +346,8 @@ export default function BookPreview() {
       };
     } else {
       return {
-        width: `${currentW.toFixed(2)} in`,
-        height: `${currentH.toFixed(2)} in`
+        width: `${Number(currentW).toFixed(3)} in`,
+        height: `${Number(currentH).toFixed(3)} in`
       };
     }
   };
@@ -714,47 +757,135 @@ export default function BookPreview() {
               </div>
             )}
 
-            {/* Horizontal Slider: Width Scale (Placed below center canvas) */}
-            {activeTab !== 'interior3d' && (
-              <div className="w-full max-w-[280px] sm:max-w-md bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-2xl flex flex-col gap-1.5 shadow-2xs">
-                <div className="flex justify-between items-center text-[10px] font-bold text-slate-550 dark:text-slate-400 uppercase tracking-wider">
-                  <span>Ширина (X Scale)</span>
-                  <span className="font-extrabold text-indigo-600 dark:text-indigo-400">{activeDims.width}</span>
+          </div>
+
+        </div>
+
+        {/* Control Panel: Transforms, Scale, Offsets */}
+        {activeTab !== 'interior3d' && (
+          <div className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-5 mt-6 rounded-2xl shadow-2xs space-y-4 max-w-4xl">
+            <div className="flex justify-between items-center">
+              <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
+                Инструменты коррекции и масштаба ({activeTab === 'cover' ? `Элемент: ${selectedElement}` : 'Активная страница'})
+              </span>
+              <button
+                onClick={resetActiveTransform}
+                type="button"
+                className="flex items-center gap-1.5 text-[9px] font-bold text-slate-500 hover:text-indigo-600 dark:hover:text-indigo-400 cursor-pointer transition-all bg-transparent border-0"
+              >
+                <RotateCcw className="w-2.5 h-2.5" />
+                <span>Сбросить сдвиг</span>
+              </button>
+            </div>
+            
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* Control 1: Width Scale */}
+              <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <span>Масштаб X (Ширина)</span>
+                  <InputField
+                    min={0.1}
+                    max={5.0}
+                    step={0.01}
+                    value={activeTransform.xScale !== undefined ? parseFloat(activeTransform.xScale) : 1.0}
+                    onChange={(val) => handlePropChange('xScale', val)}
+                  />
+                </div>
+                <div className="text-[9px] text-slate-400 font-medium">
+                  Размер: {activeDims.width}
                 </div>
                 <input
                   type="range"
                   min="0.5"
                   max="3.0"
                   step="0.01"
-                  value={activeTransform.xScale}
-                  onChange={(e) => handleScaleChange('xScale', e.target.value)}
-                  className="w-full h-1 bg-slate-200 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                  value={activeTransform.xScale !== undefined ? activeTransform.xScale : 1.0}
+                  onChange={(e) => handlePropChange('xScale', e.target.value)}
+                  className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
                 />
               </div>
-            )}
 
-          </div>
-
-          {/* Vertical Slider: Height Scale (Placed on the right side of the canvas) */}
-          {activeTab !== 'interior3d' && (
-            <div className="flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-3.5 rounded-2xl shadow-2xs h-72 self-center gap-3">
-              <div className="text-[10px] font-extrabold text-slate-550 dark:text-slate-400 uppercase tracking-wider [writing-mode:vertical-lr] rotate-180 text-center">
-                Высота (Y): {activeDims.height}
+              {/* Control 2: Height Scale */}
+              <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <span>Масштаб Y (Высота)</span>
+                  <InputField
+                    min={0.1}
+                    max={5.0}
+                    step={0.01}
+                    value={activeTransform.yScale !== undefined ? parseFloat(activeTransform.yScale) : 1.0}
+                    onChange={(val) => handlePropChange('yScale', val)}
+                  />
+                </div>
+                <div className="text-[9px] text-slate-400 font-medium">
+                  Размер: {activeDims.height}
+                </div>
+                <input
+                  type="range"
+                  min="0.5"
+                  max="3.0"
+                  step="0.01"
+                  value={activeTransform.yScale !== undefined ? activeTransform.yScale : 1.0}
+                  onChange={(e) => handlePropChange('yScale', e.target.value)}
+                  className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                />
               </div>
-              <input
-                type="range"
-                min="0.5"
-                max="3.0"
-                step="0.01"
-                value={activeTransform.yScale}
-                onChange={(e) => handleScaleChange('yScale', e.target.value)}
-                style={{ writingMode: 'vertical-lr', direction: 'rtl' }}
-                className="h-44 w-1 bg-slate-205 dark:bg-slate-800 rounded-lg appearance-none cursor-ns-resize accent-indigo-650"
-              />
-            </div>
-          )}
 
-        </div>
+              {/* Control 3: Offset X */}
+              <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <span>Смещение X (Сдвиг)</span>
+                  <InputField
+                    min={-2000}
+                    max={2000}
+                    step={1}
+                    value={activeTransform.xOffset !== undefined ? Math.round(activeTransform.xOffset) : 0}
+                    onChange={(val) => handlePropChange('xOffset', val)}
+                  />
+                </div>
+                <div className="text-[9px] text-slate-400 font-medium">
+                  в точках (Points)
+                </div>
+                <input
+                  type="range"
+                  min="-200"
+                  max="200"
+                  step="1"
+                  value={activeTransform.xOffset !== undefined ? activeTransform.xOffset : 0}
+                  onChange={(e) => handlePropChange('xOffset', e.target.value)}
+                  className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                />
+              </div>
+
+              {/* Control 4: Offset Y */}
+              <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
+                <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
+                  <span>Смещение Y (Сдвиг)</span>
+                  <InputField
+                    min={-2000}
+                    max={2000}
+                    step={1}
+                    value={activeTransform.yOffset !== undefined ? Math.round(activeTransform.yOffset) : 0}
+                    onChange={(val) => handlePropChange('yOffset', val)}
+                  />
+                </div>
+                <div className="text-[9px] text-slate-400 font-medium">
+                  в точках (Points)
+                </div>
+                <input
+                  type="range"
+                  min="-200"
+                  max="200"
+                  step="1"
+                  value={activeTransform.yOffset !== undefined ? activeTransform.yOffset : 0}
+                  onChange={(e) => handlePropChange('yOffset', e.target.value)}
+                  className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
       </div>
     </div>
   );

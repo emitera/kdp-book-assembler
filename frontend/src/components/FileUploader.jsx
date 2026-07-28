@@ -65,7 +65,7 @@ export default function FileUploader() {
 
       // 1. Strict 300 DPI Quality Check (Hard block)
       if (dims.width < reqWidthPx || dims.height < reqHeightPx) {
-        setError(`Разрешение файла ниже стандарта (300 DPI). Загрузите изображение с корректным разрешением. Требуется: ${reqWidthPx}x${reqHeightPx}px (для 300 DPI), загружено: ${dims.width}x${dims.height}px.`);
+        setError("Разрешение файла ниже стандарта (300 DPI). Загрузите изображение в лучшем качестве");
         return; // Hard block, file is rejected
       }
 
