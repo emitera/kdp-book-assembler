@@ -88,7 +88,7 @@ export default function ImageValidationModal({ isOpen, validationData, onClose }
             onClick={handleOptimizeClick}
             disabled={isProcessing}
             type="button"
-            className="flex-1 py-3 px-4 bg-indigo-650 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+            className="flex-1 py-3 px-4 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
           >
             {isProcessing ? (
               <Loader2 className="w-4 h-4 animate-spin" />

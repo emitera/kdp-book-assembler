@@ -107,8 +107,21 @@ export class CoverGenerator {
       const spineXOffset = spineImage?.xOffset || 0;
       const spineYOffset = spineImage?.yOffset || 0;
 
-      const drawSpineWidth = spineWidthPoints * spineXScale;
-      const drawSpineHeight = hPoints * spineYScale;
+      const { width: imgW, height: imgH } = embeddedSpine;
+      const imgRatio = imgW / imgH;
+      const containerRatio = spineWidthPoints / hPoints;
+
+      let baseDrawW, baseDrawH;
+      if (imgRatio > containerRatio) {
+        baseDrawW = spineWidthPoints;
+        baseDrawH = spineWidthPoints / imgRatio;
+      } else {
+        baseDrawH = hPoints;
+        baseDrawW = hPoints * imgRatio;
+      }
+
+      const drawSpineWidth = baseDrawW * spineXScale;
+      const drawSpineHeight = baseDrawH * spineYScale;
       const spineCenterX = (spineWidthPoints - drawSpineWidth) / 2;
       const spineCenterY = (hPoints - drawSpineHeight) / 2;
 
@@ -127,8 +140,21 @@ export class CoverGenerator {
     const backXOffset = backCover?.xOffset || 0;
     const backYOffset = backCover?.yOffset || 0;
 
-    const drawBackWidth = backWidthPoints * backXScale;
-    const drawBackHeight = hPoints * backYScale;
+    const { width: backImgW, height: backImgH } = embeddedBack;
+    const backImgRatio = backImgW / backImgH;
+    const backContainerRatio = backWidthPoints / hPoints;
+
+    let baseBackDrawW, baseBackDrawH;
+    if (backImgRatio > backContainerRatio) {
+      baseBackDrawW = backWidthPoints;
+      baseBackDrawH = backWidthPoints / backImgRatio;
+    } else {
+      baseBackDrawH = hPoints;
+      baseBackDrawW = hPoints * backImgRatio;
+    }
+
+    const drawBackWidth = baseBackDrawW * backXScale;
+    const drawBackHeight = baseBackDrawH * backYScale;
     const backCenterX = (backWidthPoints - drawBackWidth) / 2;
     const backCenterY = (hPoints - drawBackHeight) / 2;
 
@@ -149,8 +175,21 @@ export class CoverGenerator {
     const frontXOffset = frontCover?.xOffset || 0;
     const frontYOffset = frontCover?.yOffset || 0;
 
-    const drawFrontWidth = frontWidthPoints * frontXScale;
-    const drawFrontHeight = hPoints * frontYScale;
+    const { width: frontImgW, height: frontImgH } = embeddedFront;
+    const frontImgRatio = frontImgW / frontImgH;
+    const frontContainerRatio = frontWidthPoints / hPoints;
+
+    let baseFrontDrawW, baseFrontDrawH;
+    if (frontImgRatio > frontContainerRatio) {
+      baseFrontDrawW = frontWidthPoints;
+      baseFrontDrawH = frontWidthPoints / frontImgRatio;
+    } else {
+      baseFrontDrawH = hPoints;
+      baseFrontDrawW = hPoints * frontImgRatio;
+    }
+
+    const drawFrontWidth = baseFrontDrawW * frontXScale;
+    const drawFrontHeight = baseFrontDrawH * frontYScale;
     const frontCenterX = (frontWidthPoints - drawFrontWidth) / 2;
     const frontCenterY = (hPoints - drawFrontHeight) / 2;
 

@@ -42,6 +42,103 @@ const InputField = ({ value, onChange, min, max, step }) => {
   );
 };
 
+const PreviewImage = ({ 
+  src, 
+  xScale = 1.0, 
+  yScale = 1.0, 
+  xOffset = 0, 
+  yOffset = 0, 
+  containerWidth, 
+  containerHeight, 
+  isDragging = false,
+  isBleedEnabled = false,
+  isCover = false,
+  isOdd = false
+}) => {
+  const { activeTrimSize } = useApp();
+  const [aspectRatio, setAspectRatio] = useState(null);
+
+  const handleImageLoad = (e) => {
+    const { naturalWidth, naturalHeight } = e.target;
+    if (naturalWidth && naturalHeight) {
+      setAspectRatio(naturalWidth / naturalHeight);
+    }
+  };
+
+  // Safe fallback while loading
+  if (!aspectRatio) {
+    return (
+      <img
+        src={src}
+        onLoad={handleImageLoad}
+        alt="Loading..."
+        className="w-full h-full object-cover pointer-events-none opacity-0"
+      />
+    );
+  }
+
+  // Determine target boundaries based on Bleed
+  let targetW = containerWidth;
+  let targetH = containerHeight;
+  let targetXOffset = 0;
+  let targetYOffset = 0;
+
+  if (!isCover && !isBleedEnabled) {
+    // Bleed is OFF: Fit inside KDP Safe Zone
+    const scaleFactor = containerWidth / activeTrimSize.width;
+    const marginGutter = 0.375 * scaleFactor;
+    const marginOutside = 0.25 * scaleFactor;
+    const marginTop = 0.25 * (containerHeight / activeTrimSize.height);
+    const marginBottom = 0.25 * (containerHeight / activeTrimSize.height);
+
+    targetW = containerWidth - (marginGutter + marginOutside);
+    targetH = containerHeight - (marginTop + marginBottom);
+
+    // Centered or Gutter shifted:
+    const marginLeft = isOdd ? marginGutter : marginOutside;
+    targetXOffset = marginLeft - (containerWidth - targetW) / 2;
+    targetYOffset = marginBottom - (containerHeight - targetH) / 2;
+  }
+
+  const containerRatio = targetW / targetH;
+  
+  let imgWidth, imgHeight;
+  if (aspectRatio > containerRatio) {
+    // Image is wider than container
+    imgWidth = targetW;
+    imgHeight = targetW / aspectRatio;
+  } else {
+    // Image is taller than container
+    imgHeight = targetH;
+    imgWidth = targetH * aspectRatio;
+  }
+
+  const style = {
+    position: 'absolute',
+    left: '50%',
+    top: '50%',
+    width: `${imgWidth}px`,
+    height: `${imgHeight}px`,
+    marginLeft: `${-imgWidth / 2}px`,
+    marginTop: `${-imgHeight / 2}px`,
+    transform: `translate(${targetXOffset + (xOffset / 2)}px, ${targetYOffset + (yOffset / 2)}px) scale(${xScale}, ${yScale})`,
+    transformOrigin: 'center center',
+    maxWidth: 'none',
+    maxHeight: 'none',
+    pointerEvents: 'none',
+    transition: isDragging ? 'none' : 'transform 0.15s ease'
+  };
+
+  return (
+    <img
+      src={src}
+      onLoad={handleImageLoad}
+      alt="Previewing"
+      style={style}
+    />
+  );
+};
+
 export default function BookPreview() {
   const { t } = useTranslation();
   const {
@@ -318,36 +415,51 @@ export default function BookPreview() {
     }
   };
 
+  // Base dimensions calculation
+  let baseW = activeTrimSize.width;
+  let baseH = activeTrimSize.height;
+
+  if (activeTab === 'cover') {
+    if (selectedElement === 'front' || selectedElement === 'back') {
+      baseW = activeTrimSize.width + 0.125;
+      baseH = activeTrimSize.height + 0.25;
+    } else if (selectedElement === 'spine') {
+      baseW = spineWidth;
+      baseH = activeTrimSize.height + 0.25;
+    }
+  } else if (activeTab === 'interior2d') {
+    baseW = activeTrimSize.width + (hasBleed ? 0.125 : 0);
+    baseH = activeTrimSize.height + (hasBleed ? 0.25 : 0);
+  }
+
+  // Active units conversion helpers
+  const isPx = unit === 'px';
+  const baseWVal = isPx ? baseW * 300 : baseW;
+  const baseHVal = isPx ? baseH * 300 : baseH;
+  const unitLabel = isPx ? 'px' : 'in';
+
+  // Current physical dimensions
+  const currentW = baseWVal * (activeTransform.xScale || 1.0);
+  const currentH = baseHVal * (activeTransform.yScale || 1.0);
+
+  // Offset values in active units
+  const pointsToUnits = isPx ? 300 / 72 : 1 / 72;
+  const unitsToPoints = isPx ? 72 / 300 : 72;
+
+  const currentXOffset = (activeTransform.xOffset || 0) * pointsToUnits;
+  const currentYOffset = (activeTransform.yOffset || 0) * pointsToUnits;
+
   // Calculate dynamic active physical dimensions (Requirement 3)
   const getActivePhysicalDimensions = () => {
-    let baseW = activeTrimSize.width;
-    let baseH = activeTrimSize.height;
-
-    if (activeTab === 'cover') {
-      if (selectedElement === 'front' || selectedElement === 'back') {
-        baseW = activeTrimSize.width + 0.125;
-        baseH = activeTrimSize.height + 0.25;
-      } else if (selectedElement === 'spine') {
-        baseW = spineWidth;
-        baseH = activeTrimSize.height + 0.25;
-      }
-    } else if (activeTab === 'interior2d') {
-      baseW = activeTrimSize.width + (hasBleed ? 0.125 : 0);
-      baseH = activeTrimSize.height + (hasBleed ? 0.25 : 0);
-    }
-
-    const currentW = baseW * (activeTransform.xScale || 1.0);
-    const currentH = baseH * (activeTransform.yScale || 1.0);
-
-    if (unit === 'px') {
+    if (isPx) {
       return {
-        width: `${Math.round(currentW * 300)} px`,
-        height: `${Math.round(currentH * 300)} px`
+        width: `${Math.round(currentW)} px`,
+        height: `${Math.round(currentH)} px`
       };
     } else {
       return {
-        width: `${Number(currentW).toFixed(3)} in`,
-        height: `${Number(currentH).toFixed(3)} in`
+        width: `${currentW.toFixed(3)} in`,
+        height: `${currentH.toFixed(3)} in`
       };
     }
   };
@@ -454,16 +566,18 @@ export default function BookPreview() {
                   style={{ width: `${previewWidth}px` }}
                 >
                   {backCover ? (
-                    <div 
-                      className="w-full h-full relative"
-                      style={{
-                        transform: `translate(${backCover.xOffset / 2}px, ${backCover.yOffset / 2}px) scale(${backCover.xScale || 1.0}, ${backCover.yScale || 1.0})`,
-                        transformOrigin: 'center center',
-                        transition: dragState.isDragging ? 'none' : 'transform 0.15s ease'
-                      }}
-                    >
-                      <img src={backCover.preview} alt="Back Cover" className="w-full h-full object-cover pointer-events-none" />
-                    </div>
+                    <PreviewImage
+                      src={backCover.preview}
+                      xScale={backCover.xScale}
+                      yScale={backCover.yScale}
+                      xOffset={backCover.xOffset}
+                      yOffset={backCover.yOffset}
+                      containerWidth={previewWidth}
+                      containerHeight={previewHeight}
+                      isDragging={dragState.isDragging && selectedElement === 'back'}
+                      isBleedEnabled={true}
+                      isCover={true}
+                    />
                   ) : (
                     <span className="text-xs font-semibold text-slate-400 uppercase">Back Cover</span>
                   )}
@@ -488,16 +602,18 @@ export default function BookPreview() {
                   }}
                 >
                   {spineImage && pageCount >= 79 ? (
-                    <div 
-                      className="w-full h-full relative"
-                      style={{
-                        transform: `translate(${spineImage.xOffset / 2}px, ${spineImage.yOffset / 2}px) scale(${spineImage.xScale || 1.0}, ${spineImage.yScale || 1.0})`,
-                        transformOrigin: 'center center',
-                        transition: dragState.isDragging ? 'none' : 'transform 0.15s ease'
-                      }}
-                    >
-                      <img src={spineImage.preview} alt="Spine" className="w-full h-full object-cover pointer-events-none" />
-                    </div>
+                    <PreviewImage
+                      src={spineImage.preview}
+                      xScale={spineImage.xScale}
+                      yScale={spineImage.yScale}
+                      xOffset={spineImage.xOffset}
+                      yOffset={spineImage.yOffset}
+                      containerWidth={spinePxWidth}
+                      containerHeight={previewHeight}
+                      isDragging={dragState.isDragging && selectedElement === 'spine'}
+                      isBleedEnabled={true}
+                      isCover={true}
+                    />
                   ) : spineText && pageCount >= 79 ? (
                     <span
                       className="whitespace-nowrap font-bold text-xs uppercase tracking-widest rotate-90 select-none pointer-events-none"
@@ -521,16 +637,18 @@ export default function BookPreview() {
                   style={{ width: `${previewWidth}px` }}
                 >
                   {frontCover ? (
-                    <div 
-                      className="w-full h-full relative"
-                      style={{
-                        transform: `translate(${frontCover.xOffset / 2}px, ${frontCover.yOffset / 2}px) scale(${frontCover.xScale || 1.0}, ${frontCover.yScale || 1.0})`,
-                        transformOrigin: 'center center',
-                        transition: dragState.isDragging ? 'none' : 'transform 0.15s ease'
-                      }}
-                    >
-                      <img src={frontCover.preview} alt="Front Cover" className="w-full h-full object-cover pointer-events-none" />
-                    </div>
+                    <PreviewImage
+                      src={frontCover.preview}
+                      xScale={frontCover.xScale}
+                      yScale={frontCover.yScale}
+                      xOffset={frontCover.xOffset}
+                      yOffset={frontCover.yOffset}
+                      containerWidth={previewWidth}
+                      containerHeight={previewHeight}
+                      isDragging={dragState.isDragging && selectedElement === 'front'}
+                      isBleedEnabled={true}
+                      isCover={true}
+                    />
                   ) : (
                     <span className="text-xs font-semibold text-slate-400 uppercase">Front Cover</span>
                   )}
@@ -627,16 +745,19 @@ export default function BookPreview() {
                               <span className="text-[9px] font-bold uppercase tracking-wider">Пустая страница</span>
                             </div>
                           ) : (
-                            <div 
-                              className="w-full h-full relative"
-                              style={{
-                                transform: `translate(${leftPage.xOffset / 2}px, ${leftPage.yOffset / 2}px) scale(${leftPage.xScale || 1.0}, ${leftPage.yScale || 1.0})`,
-                                transformOrigin: 'center center',
-                                transition: dragState.isDragging ? 'none' : 'transform 0.15s ease'
-                              }}
-                            >
-                              <img src={leftPage.preview} alt="Left page" className="w-full h-full object-cover pointer-events-none" />
-                            </div>
+                            <PreviewImage
+                              src={leftPage.preview}
+                              xScale={leftPage.xScale}
+                              yScale={leftPage.yScale}
+                              xOffset={leftPage.xOffset}
+                              yOffset={leftPage.yOffset}
+                              containerWidth={previewWidth}
+                              containerHeight={previewHeight}
+                              isDragging={dragState.isDragging && selectedPageId === leftPage.id}
+                              isBleedEnabled={hasBleed}
+                              isCover={false}
+                              isOdd={false}
+                            />
                           )}
                           
                           <div className="absolute inset-1 border border-red-500/20 border-dashed pointer-events-none" />
@@ -675,16 +796,19 @@ export default function BookPreview() {
                               <span className="text-[9px] font-bold uppercase tracking-wider">Пустая страница</span>
                             </div>
                           ) : (
-                            <div 
-                              className="w-full h-full relative"
-                              style={{
-                                transform: `translate(${rightPage.xOffset / 2}px, ${rightPage.yOffset / 2}px) scale(${rightPage.xScale || 1.0}, ${rightPage.yScale || 1.0})`,
-                                transformOrigin: 'center center',
-                                transition: dragState.isDragging ? 'none' : 'transform 0.15s ease'
-                              }}
-                            >
-                              <img src={rightPage.preview} alt="Right page" className="w-full h-full object-cover pointer-events-none" />
-                            </div>
+                            <PreviewImage
+                              src={rightPage.preview}
+                              xScale={rightPage.xScale}
+                              yScale={rightPage.yScale}
+                              xOffset={rightPage.xOffset}
+                              yOffset={rightPage.yOffset}
+                              containerWidth={previewWidth}
+                              containerHeight={previewHeight}
+                              isDragging={dragState.isDragging && selectedPageId === rightPage.id}
+                              isBleedEnabled={hasBleed}
+                              isCover={false}
+                              isOdd={true}
+                            />
                           )}
                           
                           <div className="absolute inset-1 border border-red-500/20 border-dashed pointer-events-none" />
@@ -766,7 +890,7 @@ export default function BookPreview() {
           <div className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-200 dark:border-slate-800 p-5 mt-6 rounded-2xl shadow-2xs space-y-4 max-w-4xl">
             <div className="flex justify-between items-center">
               <span className="text-[10px] font-extrabold text-slate-400 uppercase tracking-wider block">
-                Инструменты коррекции и масштаба ({activeTab === 'cover' ? `Элемент: ${selectedElement}` : 'Активная страница'})
+                Инструменты коррекции ({activeTab === 'cover' ? `Элемент: ${selectedElement}` : 'Активная страница'})
               </span>
               <button
                 onClick={resetActiveTransform}
@@ -782,25 +906,25 @@ export default function BookPreview() {
               {/* Control 1: Width Scale */}
               <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
                 <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <span>Масштаб X (Ширина)</span>
+                  <span>Ширина ({unitLabel})</span>
                   <InputField
-                    min={0.1}
-                    max={5.0}
-                    step={0.01}
-                    value={activeTransform.xScale !== undefined ? parseFloat(activeTransform.xScale) : 1.0}
-                    onChange={(val) => handlePropChange('xScale', val)}
+                    min={0.1 * baseWVal}
+                    max={5.0 * baseWVal}
+                    step={isPx ? 1 : 0.001}
+                    value={parseFloat(Number(currentW).toFixed(isPx ? 0 : 3))}
+                    onChange={(val) => handlePropChange('xScale', val / baseWVal)}
                   />
                 </div>
                 <div className="text-[9px] text-slate-400 font-medium">
-                  Размер: {activeDims.width}
+                  Базовый размер: {baseWVal.toFixed(3)} {unitLabel}
                 </div>
                 <input
                   type="range"
-                  min="0.5"
-                  max="3.0"
-                  step="0.01"
-                  value={activeTransform.xScale !== undefined ? activeTransform.xScale : 1.0}
-                  onChange={(e) => handlePropChange('xScale', e.target.value)}
+                  min={0.1 * baseWVal}
+                  max={3.0 * baseWVal}
+                  step={isPx ? 1 : 0.01}
+                  value={currentW}
+                  onChange={(e) => handlePropChange('xScale', parseFloat(e.target.value) / baseWVal)}
                   className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
                 />
               </div>
@@ -808,25 +932,25 @@ export default function BookPreview() {
               {/* Control 2: Height Scale */}
               <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
                 <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <span>Масштаб Y (Высота)</span>
+                  <span>Высота ({unitLabel})</span>
                   <InputField
-                    min={0.1}
-                    max={5.0}
-                    step={0.01}
-                    value={activeTransform.yScale !== undefined ? parseFloat(activeTransform.yScale) : 1.0}
-                    onChange={(val) => handlePropChange('yScale', val)}
+                    min={0.1 * baseHVal}
+                    max={5.0 * baseHVal}
+                    step={isPx ? 1 : 0.001}
+                    value={parseFloat(Number(currentH).toFixed(isPx ? 0 : 3))}
+                    onChange={(val) => handlePropChange('yScale', val / baseHVal)}
                   />
                 </div>
                 <div className="text-[9px] text-slate-400 font-medium">
-                  Размер: {activeDims.height}
+                  Базовый размер: {baseHVal.toFixed(3)} {unitLabel}
                 </div>
                 <input
                   type="range"
-                  min="0.5"
-                  max="3.0"
-                  step="0.01"
-                  value={activeTransform.yScale !== undefined ? activeTransform.yScale : 1.0}
-                  onChange={(e) => handlePropChange('yScale', e.target.value)}
+                  min={0.1 * baseHVal}
+                  max={3.0 * baseHVal}
+                  step={isPx ? 1 : 0.01}
+                  value={currentH}
+                  onChange={(e) => handlePropChange('yScale', parseFloat(e.target.value) / baseHVal)}
                   className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
                 />
               </div>
@@ -834,25 +958,25 @@ export default function BookPreview() {
               {/* Control 3: Offset X */}
               <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
                 <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <span>Смещение X (Сдвиг)</span>
+                  <span>Смещение X ({unitLabel})</span>
                   <InputField
-                    min={-2000}
-                    max={2000}
-                    step={1}
-                    value={activeTransform.xOffset !== undefined ? Math.round(activeTransform.xOffset) : 0}
-                    onChange={(val) => handlePropChange('xOffset', val)}
+                    min={isPx ? -2000 : -10.0}
+                    max={isPx ? 2000 : 10.0}
+                    step={isPx ? 1 : 0.001}
+                    value={parseFloat(Number(currentXOffset).toFixed(isPx ? 0 : 3))}
+                    onChange={(val) => handlePropChange('xOffset', val / pointsToUnits)}
                   />
                 </div>
                 <div className="text-[9px] text-slate-400 font-medium">
-                  в точках (Points)
+                  Сдвиг по горизонтали
                 </div>
                 <input
                   type="range"
-                  min="-200"
-                  max="200"
-                  step="1"
-                  value={activeTransform.xOffset !== undefined ? activeTransform.xOffset : 0}
-                  onChange={(e) => handlePropChange('xOffset', e.target.value)}
+                  min={isPx ? -1000 : -3.0}
+                  max={isPx ? 1000 : 3.0}
+                  step={isPx ? 1 : 0.01}
+                  value={currentXOffset}
+                  onChange={(e) => handlePropChange('xOffset', parseFloat(e.target.value) / pointsToUnits)}
                   className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
                 />
               </div>
@@ -860,25 +984,25 @@ export default function BookPreview() {
               {/* Control 4: Offset Y */}
               <div className="space-y-1.5 bg-white dark:bg-slate-900 border border-slate-150 dark:border-slate-850 p-3 rounded-xl text-left">
                 <div className="flex justify-between items-center text-xs font-bold text-slate-700 dark:text-slate-300">
-                  <span>Смещение Y (Сдвиг)</span>
+                  <span>Смещение Y ({unitLabel})</span>
                   <InputField
-                    min={-2000}
-                    max={2000}
-                    step={1}
-                    value={activeTransform.yOffset !== undefined ? Math.round(activeTransform.yOffset) : 0}
-                    onChange={(val) => handlePropChange('yOffset', val)}
+                    min={isPx ? -2000 : -10.0}
+                    max={isPx ? 2000 : 10.0}
+                    step={isPx ? 1 : 0.001}
+                    value={parseFloat(Number(currentYOffset).toFixed(isPx ? 0 : 3))}
+                    onChange={(val) => handlePropChange('yOffset', val / pointsToUnits)}
                   />
                 </div>
                 <div className="text-[9px] text-slate-400 font-medium">
-                  в точках (Points)
+                  Сдвиг по вертикали
                 </div>
                 <input
                   type="range"
-                  min="-200"
-                  max="200"
-                  step="1"
-                  value={activeTransform.yOffset !== undefined ? activeTransform.yOffset : 0}
-                  onChange={(e) => handlePropChange('yOffset', e.target.value)}
+                  min={isPx ? -1000 : -3.0}
+                  max={isPx ? 1000 : 3.0}
+                  step={isPx ? 1 : 0.01}
+                  value={currentYOffset}
+                  onChange={(e) => handlePropChange('yOffset', parseFloat(e.target.value) / pointsToUnits)}
                   className="w-full h-1 bg-slate-100 dark:bg-slate-800 rounded-lg appearance-none cursor-pointer accent-indigo-650"
                 />
               </div>

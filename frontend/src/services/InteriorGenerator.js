@@ -91,17 +91,26 @@ export class InteriorGenerator {
           const arrayBuffer = await flattenedBlob.arrayBuffer();
           const embeddedImage = await pdfDoc.embedJpg(arrayBuffer);
 
-          // Calculate safe drawing dimensions with Gutter logic
-          // Available width W becomes W - Gutter
-          const targetW = wPoints - gutterShiftPoints;
-          const scaleDownFactor = targetW / wPoints;
-          const targetH = hPoints * scaleDownFactor;
+          // Determine target drawing rectangle based on Bleed status
+          let targetW, targetH, baseX, baseY;
+          if (hasBleed) {
+            // Bleed is ON: Full physical canvas
+            targetW = wPoints;
+            targetH = hPoints;
+            baseX = 0;
+            baseY = 0;
+          } else {
+            // Bleed is OFF: KDP Safe Zone
+            const marginLeft = isOdd ? inchesToPoints(0.375) : inchesToPoints(0.25);
+            const marginRight = isOdd ? inchesToPoints(0.25) : inchesToPoints(0.375);
+            const marginTop = inchesToPoints(0.25);
+            const marginBottom = inchesToPoints(0.25);
 
-          // Determine layout base coordinates:
-          // Odd (Right Page): Gutter on the LEFT. Starts at gutterShiftPoints.
-          // Even (Left Page): Gutter on the RIGHT. Starts at 0.
-          const baseX = isOdd ? gutterShiftPoints : 0;
-          const baseY = (hPoints - targetH) / 2;
+            targetW = wPoints - (marginLeft + marginRight);
+            targetH = hPoints - (marginTop + marginBottom);
+            baseX = marginLeft;
+            baseY = marginBottom;
+          }
 
           // Retrieve user transform parameters
           const userX = pageData.xOffset || 0;
@@ -109,10 +118,24 @@ export class InteriorGenerator {
           const userScaleX = pageData.xScale || 1.0;
           const userScaleY = pageData.yScale || 1.0;
 
-          const drawW = targetW * userScaleX;
-          const drawH = targetH * userScaleY;
+          // Compute aspect ratio contain dimensions
+          const { width: imgW, height: imgH } = embeddedImage;
+          const imgRatio = imgW / imgH;
+          const containerRatio = targetW / targetH;
 
-          // Align center within safe margins
+          let baseDrawW, baseDrawH;
+          if (imgRatio > containerRatio) {
+            baseDrawW = targetW;
+            baseDrawH = targetW / imgRatio;
+          } else {
+            baseDrawH = targetH;
+            baseDrawW = targetH * imgRatio;
+          }
+
+          const drawW = baseDrawW * userScaleX;
+          const drawH = baseDrawH * userScaleY;
+
+          // Align center within target rectangle
           const centerX = (targetW - drawW) / 2;
           const centerY = (targetH - drawH) / 2;
 
