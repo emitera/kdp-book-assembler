@@ -847,12 +847,29 @@ export default function BookPreview() {
                   className="shadow-2xl border border-slate-100 dark:border-slate-850 rounded-lg"
                   ref={flipBookRef}
                 >
-                  <div className="bg-white border-l border-slate-200 shadow-sm relative h-full w-full overflow-hidden">
-                    <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-50 text-slate-400">
-                      <BookOpen className="w-12 h-12 mb-2 opacity-35" />
-                      <span className="text-xs font-extrabold uppercase">KDP TITLE INNER</span>
+                  {frontCover ? (
+                    <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
+                      <PreviewImage
+                        src={frontCover.preview}
+                        xScale={frontCover.xScale}
+                        yScale={frontCover.yScale}
+                        xOffset={frontCover.xOffset}
+                        yOffset={frontCover.yOffset}
+                        containerWidth={previewWidth}
+                        containerHeight={previewHeight}
+                        isDragging={false}
+                        isBleedEnabled={true}
+                        isCover={true}
+                      />
                     </div>
-                  </div>
+                  ) : (
+                    <div className="bg-white border-l border-slate-200 shadow-sm relative h-full w-full overflow-hidden">
+                      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-50 text-slate-400">
+                        <BookOpen className="w-12 h-12 mb-2 opacity-35" />
+                        <span className="text-xs font-extrabold uppercase">Передняя обложка</span>
+                      </div>
+                    </div>
+                  )}
 
                   {compiledPages.map((page, idx) => (
                     <div key={page.id || idx} className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
@@ -862,14 +879,18 @@ export default function BookPreview() {
                           <span className="text-xs font-extrabold uppercase">Blank Page</span>
                         </div>
                       ) : (
-                        <img 
-                          src={page.preview} 
-                          alt="Interior spread" 
-                          className="w-full h-full object-cover pointer-events-none" 
-                          style={{
-                            transform: `translate(${page.xOffset / 2}px, ${page.yOffset / 2}px) scale(${page.xScale || 1.0}, ${page.yScale || 1.0})`,
-                            transformOrigin: 'center center'
-                          }}
+                        <PreviewImage
+                          src={page.preview}
+                          xScale={page.xScale}
+                          yScale={page.yScale}
+                          xOffset={page.xOffset}
+                          yOffset={page.yOffset}
+                          containerWidth={previewWidth}
+                          containerHeight={previewHeight}
+                          isDragging={false}
+                          isBleedEnabled={hasBleed}
+                          isCover={false}
+                          isOdd={idx % 2 !== 0}
                         />
                       )}
                       <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[9px] text-slate-400 font-mono">
@@ -877,6 +898,30 @@ export default function BookPreview() {
                       </div>
                     </div>
                   ))}
+
+                  {backCover ? (
+                    <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
+                      <PreviewImage
+                        src={backCover.preview}
+                        xScale={backCover.xScale}
+                        yScale={backCover.yScale}
+                        xOffset={backCover.xOffset}
+                        yOffset={backCover.yOffset}
+                        containerWidth={previewWidth}
+                        containerHeight={previewHeight}
+                        isDragging={false}
+                        isBleedEnabled={true}
+                        isCover={true}
+                      />
+                    </div>
+                  ) : (
+                    <div className="bg-white border-r border-slate-200 shadow-sm relative h-full w-full overflow-hidden">
+                      <div className="flex flex-col items-center justify-center h-full p-8 text-center bg-slate-50 text-slate-400">
+                        <BookOpen className="w-12 h-12 mb-2 opacity-35" />
+                        <span className="text-xs font-extrabold uppercase">Задняя обложка</span>
+                      </div>
+                    </div>
+                  )}
                 </HTMLFlipBook>
               </div>
             )}
