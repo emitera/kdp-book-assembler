@@ -38,6 +38,7 @@ export default function Dashboard() {
     spineColor,
     spineText,
     spineTextColor,
+    spineTextDirection,
     spineImage,
     activeTrimSize,
     activePaperType,
@@ -155,6 +156,7 @@ export default function Dashboard() {
         spineColor: spineColor,
         spineText: spineText,
         spineTextColor: spineTextColor,
+        spineTextDirection: spineTextDirection,
         spineImage: spineImage
       });
       setGenerationProgress(50);

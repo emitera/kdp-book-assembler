@@ -97,6 +97,7 @@ export const AppProvider = ({ children }) => {
   const [spineColor, setSpineColor] = useState('#FFFFFF');
   const [spineText, setSpineText] = useState('');
   const [spineTextColor, setSpineTextColor] = useState('#000000');
+  const [spineTextDirection, setSpineTextDirection] = useState('top-to-bottom'); // 'top-to-bottom' | 'bottom-to-top'
   const [spineImage, setSpineImage] = useState(null); // File & preview URL
 
   // Anti-piracy / Billing State
@@ -336,6 +337,7 @@ export const AppProvider = ({ children }) => {
     setSpineText('');
     setSpineColor('#FFFFFF');
     setSpineTextColor('#000000');
+    setSpineTextDirection('top-to-bottom');
     setOneTimeProjectPass(false);
   };
 
@@ -432,6 +434,8 @@ export const AppProvider = ({ children }) => {
     setSpineText,
     spineTextColor,
     setSpineTextColor,
+    spineTextDirection,
+    setSpineTextDirection,
     proToken,
     setProToken,
     oneTimeProjectPass,

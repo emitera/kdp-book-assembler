@@ -149,6 +149,7 @@ export default function BookPreview() {
     spineColor,
     spineText,
     spineTextColor,
+    spineTextDirection,
     activeTrimSize,
     activePaperType,
     hasBleed,
@@ -221,6 +222,7 @@ export default function BookPreview() {
   };
 
   const compiledPages = getCompiledPages();
+  const pxPerInch = previewHeight / activeTrimSize.height;
 
   // Create spreads of pages
   const getSpreads = () => {
@@ -616,12 +618,27 @@ export default function BookPreview() {
                     />
                   ) : spineText && pageCount >= 79 ? (
                     <span
-                      className="whitespace-nowrap font-bold text-xs uppercase tracking-widest rotate-90 select-none pointer-events-none"
-                      style={{ color: spineTextColor }}
+                      className="whitespace-nowrap font-bold uppercase tracking-widest select-none pointer-events-none z-5"
+                      style={{
+                        color: spineTextColor,
+                        transform: `rotate(${spineTextDirection === 'bottom-to-top' ? -90 : 90}deg)`,
+                        fontSize: `${Math.min(12, Math.max(4, (spineWidth - 0.125) * pxPerInch))}px`
+                      }}
                     >
                       {spineText}
                     </span>
                   ) : null}
+                  {selectedElement === 'spine' && (
+                    <div
+                      className="absolute border border-dashed border-red-500/60 pointer-events-none z-10"
+                      style={{
+                        left: `${0.0625 * pxPerInch}px`,
+                        right: `${0.0625 * pxPerInch}px`,
+                        top: `${0.25 * pxPerInch}px`,
+                        bottom: `${0.25 * pxPerInch}px`
+                      }}
+                    />
+                  )}
                   {renderSmartGuides('spine')}
                 </div>
 

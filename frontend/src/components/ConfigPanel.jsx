@@ -28,6 +28,8 @@ export default function ConfigPanel() {
     setSpineText,
     spineTextColor,
     setSpineTextColor,
+    spineTextDirection,
+    setSpineTextDirection,
     activeTrimSize,
     activePaperType
   } = useApp();
@@ -278,6 +280,34 @@ export default function ConfigPanel() {
                   onChange={(e) => setSpineTextColor(e.target.value)}
                   className="w-8 h-8 border-0 p-0 rounded-lg overflow-hidden cursor-pointer"
                 />
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-1.5 pt-1">
+              <span className="text-[10px] text-slate-450 uppercase tracking-wider font-medium">Направление текста</span>
+              <div className="grid grid-cols-2 gap-2 bg-slate-50 dark:bg-slate-900/60 p-1 rounded-xl border border-slate-100 dark:border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setSpineTextDirection('top-to-bottom')}
+                  className={`py-1.5 px-3 rounded-lg text-[10px] font-bold transition-all cursor-pointer text-center ${
+                    spineTextDirection === 'top-to-bottom'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-650 dark:text-indigo-400 shadow-xs border border-slate-200/50 dark:border-slate-700/50'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 border border-transparent'
+                  }`}
+                >
+                  Сверху вниз
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSpineTextDirection('bottom-to-top')}
+                  className={`py-1.5 px-3 rounded-lg text-[10px] font-bold transition-all cursor-pointer text-center ${
+                    spineTextDirection === 'bottom-to-top'
+                      ? 'bg-white dark:bg-slate-800 text-indigo-650 dark:text-indigo-400 shadow-xs border border-slate-200/50 dark:border-slate-700/50'
+                      : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 border border-transparent'
+                  }`}
+                >
+                  Снизу вверх
+                </button>
               </div>
             </div>
           </div>

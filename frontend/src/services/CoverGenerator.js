@@ -29,6 +29,7 @@ export class CoverGenerator {
     spineColor,
     spineText,
     spineTextColor,
+    spineTextDirection,
     spineImage
   }) {
     const frontCoverFile = frontCover?.file || frontCover;
@@ -205,7 +206,7 @@ export class CoverGenerator {
       const font = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
       
       // Calculate font size that safely fits the spine width with safety margins
-      // KDP requires at least 0.0625" (4.5 pt) safety margin on both sides of spine text
+      // KDP requires at least 0.0625" safety margin on both sides of spine text
       const safetyMargin = inchesToPoints(0.0625);
       const maxTextHeight = spineWidthPoints - (safetyMargin * 2);
       
@@ -215,20 +216,28 @@ export class CoverGenerator {
         
         const cleanText = spineText.toUpperCase().trim();
         const textWidth = font.widthOfTextAtSize(cleanText, fontSize);
-        const textHeight = font.heightAtSize(fontSize);
-
+        const capHeight = fontSize * 0.7; // Helvetica Bold cap height ratio is approx 0.7
+        
         // Center spine X: middle of spine area
         const spineCenterX = backWidthPoints + (spineWidthPoints / 2);
         
-        // With -90 degree rotation (clockwise):
-        // Bounding box: X extends to the left from starting x. Y extends downwards from starting y.
-        // We align baseline so that starting x is (spineCenterX + textHeight / 2)
-        const startX = spineCenterX + (textHeight / 2.5);
-        // Center vertically on page:
-        const startY = (hPoints / 2) + (textWidth / 2);
+        let startX, startY, rotateAngle;
+        
+        if (spineTextDirection === 'bottom-to-top') {
+          // Bottom to Top (European standard, European shelf reading)
+          rotateAngle = degrees(90);
+          startX = spineCenterX + (capHeight / 2);
+          startY = (hPoints / 2) - (textWidth / 2);
+        } else {
+          // Top to Bottom (American standard, American shelf reading) - Default
+          rotateAngle = degrees(-90);
+          startX = spineCenterX - (capHeight / 2);
+          startY = (hPoints / 2) + (textWidth / 2);
+        }
 
-        // Ensure text length does not exceed page height (minus margins)
-        if (textWidth < hPoints - inchesToPoints(0.5)) {
+        // Ensure text length does not exceed page height minus 0.25" margins from top and bottom
+        const maxAllowedLength = hPoints - inchesToPoints(0.5);
+        if (textWidth <= maxAllowedLength) {
           const textRgb = parseHexToRgb(spineTextColor || '#000000');
           page.drawText(cleanText, {
             x: startX,
@@ -236,7 +245,7 @@ export class CoverGenerator {
             size: fontSize,
             font: font,
             color: textRgb,
-            rotate: degrees(-90)
+            rotate: rotateAngle
           });
         }
       }
