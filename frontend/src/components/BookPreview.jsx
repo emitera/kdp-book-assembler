@@ -843,6 +843,8 @@ export default function BookPreview() {
                   minHeight={250}
                   maxHeight={600}
                   showCover={true}
+                  usePortrait={false}
+                  display="double"
                   flippingTime={600}
                   className="shadow-2xl border border-slate-100 dark:border-slate-850 rounded-lg"
                   ref={flipBookRef}
