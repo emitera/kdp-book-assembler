@@ -41,16 +41,26 @@ export function calculateSpineWidth(pageCount, multiplier) {
   return pageCount * multiplier;
 }
 
+export const HARDCOVER_WRAP_INCHES = 0.591;
+export const HARDCOVER_HINGE_INCHES = 0.394;
+
 /**
  * Calculates full cover PDF dimensions in inches.
  * @param {number} trimWidth - Page trim width in inches
  * @param {number} trimHeight - Page trim height in inches
  * @param {number} spineWidth - Calculated spine width in inches
+ * @param {boolean} hasBleed - Whether pages have bleed (paperback)
+ * @param {string} bindingType - 'paperback' | 'hardcover'
  * @returns {{width: number, height: number}} Cover dimensions in inches
  */
-export function calculateCoverDimensions(trimWidth, trimHeight, spineWidth) {
-  const width = (trimWidth * 2) + spineWidth + (BLEED_INCHES * 2);
-  const height = trimHeight + (BLEED_INCHES * 2);
+export function calculateCoverDimensions(trimWidth, trimHeight, spineWidth, hasBleed = true, bindingType = 'paperback') {
+  if (bindingType === 'hardcover') {
+    const width = (trimWidth * 2) + spineWidth + (HARDCOVER_WRAP_INCHES * 2) + (HARDCOVER_HINGE_INCHES * 2);
+    const height = trimHeight + (HARDCOVER_WRAP_INCHES * 2);
+    return { width, height };
+  }
+  const width = (trimWidth * 2) + spineWidth + (hasBleed ? (BLEED_INCHES * 2) : 0);
+  const height = trimHeight + (hasBleed ? (BLEED_INCHES * 2) : 0);
   return { width, height };
 }
 

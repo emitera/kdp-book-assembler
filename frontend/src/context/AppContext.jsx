@@ -80,7 +80,11 @@ export const AppProvider = ({ children }) => {
   });
 
   // KDP Project Settings State
+  const [bindingType, setBindingType] = useState('paperback'); // 'paperback' | 'hardcover'
+  const [coverType, setCoverType] = useState('parts'); // 'parts' | 'full'
   const [trimSizeId, setTrimSizeId] = useState(TRIM_SIZES[0].id);
+  const [customWidth, setCustomWidth] = useState(6.0);
+  const [customHeight, setCustomHeight] = useState(9.0);
   const [paperTypeId, setPaperTypeId] = useState(PAPER_TYPES[0].id);
   const [hasBleed, setHasBleed] = useState(true);
   const [orientation, setOrientation] = useState('portrait'); // 'portrait' | 'landscape'
@@ -91,6 +95,7 @@ export const AppProvider = ({ children }) => {
   // File Upload State
   const [frontCover, setFrontCover] = useState(null); // File & preview URL
   const [backCover, setBackCover] = useState(null);   // File & preview URL
+  const [fullCover, setFullCover] = useState(null);   // File & preview URL
   const [interiorPages, setInteriorPages] = useState([]); // Array of { id, file, preview }
   
   // Custom Spine Configurations
@@ -105,10 +110,25 @@ export const AppProvider = ({ children }) => {
   const [oneTimeProjectPass, setOneTimeProjectPass] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState('idle'); // 'idle' | 'pending' | 'error'
 
+  // Enforce hardcover trim size allowed values
+  useEffect(() => {
+    if (bindingType === 'hardcover') {
+      const allowedHardcoverSizes = ['5.5x8.5', '6x9', '6.14x9.21', '7x10', '8.25x11'];
+      if (!allowedHardcoverSizes.includes(trimSizeId)) {
+        setTrimSizeId('6x9');
+      }
+    }
+  }, [bindingType, trimSizeId]);
+
   // Retrieve current active config objects
   const baseTrimSize = TRIM_SIZES.find(t => t.id === trimSizeId) || TRIM_SIZES[0];
   const isLandscape = orientation === 'landscape';
-  const activeTrimSize = {
+  const activeTrimSize = trimSizeId === 'custom' ? {
+    id: 'custom',
+    name: `Custom (${customWidth}" x ${customHeight}")`,
+    width: isLandscape ? customHeight : customWidth,
+    height: isLandscape ? customWidth : customHeight
+  } : {
     ...baseTrimSize,
     width: isLandscape ? baseTrimSize.height : baseTrimSize.width,
     height: isLandscape ? baseTrimSize.width : baseTrimSize.height,
@@ -316,6 +336,28 @@ export const AppProvider = ({ children }) => {
     setBackCover(prev => prev ? { ...prev, ...updates } : null);
   };
 
+  const updateFullCoverTransform = (updates) => {
+    setFullCover(prev => prev ? { ...prev, ...updates } : null);
+  };
+
+  const handleSetFullCover = (file) => {
+    if (!file) {
+      revokeFilePreview(fullCover);
+      setFullCover(null);
+      return;
+    }
+    const previewUrl = URL.createObjectURL(file);
+    revokeFilePreview(fullCover);
+    setFullCover({
+      file,
+      preview: previewUrl,
+      xOffset: 0,
+      yOffset: 0,
+      xScale: 1.0,
+      yScale: 1.0
+    });
+  };
+
   const updateSpineImageTransform = (updates) => {
     setSpineImage(prev => prev ? { ...prev, ...updates } : null);
   };
@@ -327,11 +369,13 @@ export const AppProvider = ({ children }) => {
   const handleClearAll = () => {
     revokeFilePreview(frontCover);
     revokeFilePreview(backCover);
+    revokeFilePreview(fullCover);
     revokeFilePreview(spineImage);
     interiorPages.forEach(p => revokeFilePreview(p));
 
     setFrontCover(null);
     setBackCover(null);
+    setFullCover(null);
     setSpineImage(null);
     setInteriorPages([]);
     setSpineText('');
@@ -339,6 +383,8 @@ export const AppProvider = ({ children }) => {
     setSpineTextColor('#000000');
     setSpineTextDirection('top-to-bottom');
     setOneTimeProjectPass(false);
+    setBindingType('paperback');
+    setCoverType('parts');
   };
 
   const handlePurchaseProjectPass = async (email, provider = 'paypal', planType = 'one_time', amount = 9.99) => {
@@ -410,8 +456,16 @@ export const AppProvider = ({ children }) => {
 
     // State
     projectId,
+    bindingType,
+    setBindingType,
+    coverType,
+    setCoverType,
     trimSizeId,
     setTrimSizeId,
+    customWidth,
+    setCustomWidth,
+    customHeight,
+    setCustomHeight,
     paperTypeId,
     setPaperTypeId,
     hasBleed,
@@ -426,6 +480,7 @@ export const AppProvider = ({ children }) => {
     setUnit,
     frontCover,
     backCover,
+    fullCover,
     spineImage,
     interiorPages,
     spineColor,
@@ -450,10 +505,12 @@ export const AppProvider = ({ children }) => {
     // Actions
     setFrontCover: handleSetFrontCover,
     setBackCover: handleSetBackCover,
+    setFullCover: handleSetFullCover,
     setSpineImage: handleSetSpineImage,
     setInteriorPages: handleSetInteriorPages,
     updateFrontCoverTransform,
     updateBackCoverTransform,
+    updateFullCoverTransform,
     updateSpineImageTransform,
     updatePageTransform,
     clearAll: handleClearAll,

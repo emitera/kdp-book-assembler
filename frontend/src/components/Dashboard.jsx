@@ -34,6 +34,9 @@ export default function Dashboard() {
   const {
     frontCover,
     backCover,
+    fullCover,
+    coverType,
+    bindingType,
     interiorPages,
     spineColor,
     spineText,
@@ -86,8 +89,8 @@ export default function Dashboard() {
   const [showOnlyPaidPlans, setShowOnlyPaidPlans] = useState(false);
   const [isShowLowPageCountConfirm, setIsShowLowPageCountConfirm] = useState(false);
 
-  const pageCount = (interiorPages.length * (isSingleSided ? 2 : 1)) + (addBlankAtStart ? 1 : 0);
-  const isCoverReady = !!(frontCover && backCover);
+  const pageCount = (interiorPages.length * (isSingleSided ? 2 : 1)) + (addBlankAtStart ? (isSingleSided ? 2 : 1) : 0);
+  const isCoverReady = coverType === 'full' ? !!fullCover : !!(frontCover && backCover);
   const isInteriorReady = pageCount >= 24;
   const canGenerate = isCoverReady && interiorPages.length > 0;
 
@@ -150,6 +153,9 @@ export default function Dashboard() {
       const coverPdfBlob = await CoverGenerator.generate({
         frontCover: frontCover,
         backCover: backCover,
+        fullCover: fullCover,
+        coverType: coverType,
+        bindingType: bindingType,
         trimSize: activeTrimSize,
         paperType: activePaperType,
         pageCount: pageCount,
@@ -157,7 +163,8 @@ export default function Dashboard() {
         spineText: spineText,
         spineTextColor: spineTextColor,
         spineTextDirection: spineTextDirection,
-        spineImage: spineImage
+        spineImage: spineImage,
+        hasBleed: hasBleed
       });
       setGenerationProgress(50);
 
