@@ -245,6 +245,7 @@ export default function BookPreview() {
   const {
     bindingType,
     coverType,
+    trimSizeId,
     frontCover,
     backCover,
     fullCover,

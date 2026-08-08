@@ -53,7 +53,11 @@ export default function ConfigPanel() {
 
   // Derive print type and paper type for distinct select options
   const currentPrintType = activePaperType.type; // 'bw' | 'color'
-  const currentPaperColor = paperTypeId.includes('cream') ? 'cream' : 'white';
+  const currentPaperColor = paperTypeId === 'cream_bw' 
+    ? 'cream' 
+    : paperTypeId === 'groundwood_bw' 
+      ? 'groundwood' 
+      : 'white';
 
   const allowedHardcoverSizes = ['5.5x8.5', '6x9', '6.14x9.21', '7x10', '8.25x11'];
 
@@ -75,7 +79,13 @@ export default function ConfigPanel() {
   const handlePaperColorChange = (e) => {
     const val = e.target.value;
     if (currentPrintType === 'bw') {
-      setPaperTypeId(val === 'cream' ? 'cream_bw' : 'white_bw');
+      if (val === 'cream') {
+        setPaperTypeId('cream_bw');
+      } else if (val === 'groundwood') {
+        setPaperTypeId('groundwood_bw');
+      } else {
+        setPaperTypeId('white_bw');
+      }
     }
   };
 
@@ -204,12 +214,14 @@ export default function ConfigPanel() {
                 Тип печати
               </label>
               <select
-                value={paperTypeId === 'cream_bw' || paperTypeId === 'white_bw' ? 'bw' : paperTypeId}
+                value={paperTypeId.includes('bw') ? 'bw' : paperTypeId}
                 onChange={handlePrintTypeChange}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-250 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
+                className="w-full bg-slate-50 dark:bg-slate-955 border border-slate-250 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500 cursor-pointer"
               >
                 <option value="bw">Черно-белая (B&W)</option>
-                <option value="std_color">Standard Color (Цветная стандартная)</option>
+                {bindingType === 'paperback' && (
+                  <option value="std_color">Standard Color (Цветная стандартная)</option>
+                )}
                 <option value="prem_color">Premium Color (Цветная премиум)</option>
               </select>
             </div>
@@ -223,10 +235,13 @@ export default function ConfigPanel() {
                 value={currentPaperColor}
                 onChange={handlePaperColorChange}
                 disabled={currentPrintType !== 'bw'}
-                className="w-full bg-slate-50 dark:bg-slate-950 border border-slate-250 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50 cursor-pointer"
+                className="w-full bg-slate-50 dark:bg-slate-955 border border-slate-250 dark:border-slate-800 rounded-xl px-3.5 py-2.5 text-xs font-semibold text-slate-700 dark:text-slate-300 focus:outline-none focus:border-indigo-500 disabled:opacity-50 cursor-pointer"
               >
                 <option value="white">Белая бумага (White Paper)</option>
                 <option value="cream">Кремовая бумага (Cream Paper)</option>
+                {bindingType === 'paperback' && (
+                  <option value="groundwood">Groundwood бумага (Groundwood Paper)</option>
+                )}
               </select>
               {currentPrintType !== 'bw' && (
                 <span className="text-[9px] text-slate-400">

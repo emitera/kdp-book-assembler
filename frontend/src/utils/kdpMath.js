@@ -13,6 +13,7 @@ export const TRIM_SIZES = [
   { id: '7.5x9.25', name: '7.5" x 9.25"', width: 7.5, height: 9.25 },
   { id: '8x10', name: '8" x 10"', width: 8.0, height: 10.0 },
   { id: '8.5x11', name: '8.5" x 11"', width: 8.5, height: 11.0 },
+  { id: '8.25x11', name: '8.25" x 11"', width: 8.25, height: 11.0 },
   { id: '8.27x11.69', name: '8.27" x 11.69" (A4)', width: 8.27, height: 11.69 },
   { id: '8.25x6', name: '8.25" x 6" (Landscape)', width: 8.25, height: 6.0 },
   { id: '8.25x8.25', name: '8.25" x 8.25"', width: 8.25, height: 8.25 },
@@ -22,6 +23,7 @@ export const TRIM_SIZES = [
 export const PAPER_TYPES = [
   { id: 'white_bw', name: 'Black & White (White Paper)', multiplier: 0.002252, type: 'bw' },
   { id: 'cream_bw', name: 'Black & White (Cream Paper)', multiplier: 0.0025, type: 'bw' },
+  { id: 'groundwood_bw', name: 'Black & White (Groundwood Paper)', multiplier: 0.002252, type: 'bw' },
   { id: 'std_color', name: 'Standard Color (White Paper)', multiplier: 0.002252, type: 'color' },
   { id: 'prem_color', name: 'Premium Color (White Paper)', multiplier: 0.002347, type: 'color' }
 ];

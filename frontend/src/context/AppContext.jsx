@@ -110,15 +110,28 @@ export const AppProvider = ({ children }) => {
   const [oneTimeProjectPass, setOneTimeProjectPass] = useState(false);
   const [checkoutStatus, setCheckoutStatus] = useState('idle'); // 'idle' | 'pending' | 'error'
 
-  // Enforce hardcover trim size allowed values
+  // Enforce KDP rules and cascading properties dependencies
   useEffect(() => {
     if (bindingType === 'hardcover') {
+      // 1. Enforce allowed hardcover trim sizes
       const allowedHardcoverSizes = ['5.5x8.5', '6x9', '6.14x9.21', '7x10', '8.25x11'];
       if (!allowedHardcoverSizes.includes(trimSizeId)) {
         setTrimSizeId('6x9');
       }
+      
+      // 2. Enforce allowed hardcover print types
+      // Hardcover only allows Premium Color (prem_color) or B&W (white_bw / cream_bw)
+      if (paperTypeId === 'std_color') {
+        setPaperTypeId('prem_color');
+      }
+      
+      // 3. Enforce allowed hardcover B&W paper colors
+      // Hardcover B&W only allows White (white_bw) or Cream (cream_bw)
+      if (paperTypeId === 'groundwood_bw') {
+        setPaperTypeId('white_bw');
+      }
     }
-  }, [bindingType, trimSizeId]);
+  }, [bindingType, trimSizeId, paperTypeId]);
 
   // Retrieve current active config objects
   const baseTrimSize = TRIM_SIZES.find(t => t.id === trimSizeId) || TRIM_SIZES[0];
