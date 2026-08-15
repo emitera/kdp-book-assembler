@@ -5,7 +5,7 @@ interface CheckoutParams {
   userId?: string;
   projectId?: string;
   type: 'subscription' | 'subscription_monthly' | 'subscription_yearly' | 'project_pass';
-  provider: 'paypal' | 'allpay';
+  provider: 'paypal' | 'allpay' | 'paddle';
   amount: number;
 }
 
@@ -23,7 +23,80 @@ export async function createCheckoutSession(env: any, params: CheckoutParams) {
     email
   });
 
-  if (provider === 'paypal') {
+  const supabase = getSupabaseClient(env);
+
+  if (provider === 'paddle') {
+    // Paddle Billing Integration
+    try {
+      const { data: pSettings } = await supabase
+        .from('payment_settings')
+        .select('*')
+        .eq('id', 'global')
+        .single();
+
+      const isSandbox = pSettings?.paddle_environment === 'sandbox';
+      const paddleApiUrl = isSandbox 
+        ? 'https://sandbox-api.paddle.com' 
+        : 'https://api.paddle.com';
+      const apiKey = pSettings?.paddle_api_key;
+
+      let priceId = pSettings?.paddle_price_onetime;
+      if (type === 'subscription_monthly' || type === 'subscription') {
+        priceId = pSettings?.paddle_price_monthly;
+      } else if (type === 'subscription_yearly') {
+        priceId = pSettings?.paddle_price_yearly;
+      }
+
+      if (apiKey && priceId) {
+        const txResponse = await fetch(`${paddleApiUrl}/transactions`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            items: [{ price_id: priceId, quantity: 1 }],
+            customer_email: email,
+            custom_data: {
+              userId: userId || '',
+              projectId: projectId || '',
+              type: type,
+              email: email
+            },
+            checkout: {
+              success_url: `${env.FRONTEND_URL || 'https://birdypages.io'}?payment=success&projectId=${projectId || ''}`
+            }
+          })
+        });
+
+        if (txResponse.ok) {
+          const txData: any = await txResponse.json();
+          const checkoutUrl = txData.data?.checkout?.url;
+          if (checkoutUrl) {
+            return { checkoutUrl, transactionId: txData.data?.id };
+          }
+        }
+      }
+
+      // Fallback checkout simulation if keys aren't configured yet
+      const checkoutQuery = new URLSearchParams({
+        provider: 'paddle',
+        amount: amount.toString(),
+        type: type,
+        customId: customId
+      });
+      return {
+        checkoutUrl: `http://localhost:3000/api/simulate-payment?${checkoutQuery.toString()}`,
+        simulated: true
+      };
+    } catch (err: any) {
+      console.error('Paddle Checkout Error:', err);
+      return {
+        checkoutUrl: `http://localhost:3000/api/simulate-payment?provider=paddle&amount=${amount}&customId=${encodeURIComponent(customId)}`,
+        simulated: true
+      };
+    }
+  } else if (provider === 'paypal') {
     // Standard PayPal integration: Retrieve Access Token
     try {
       const auth = btoa(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`);
@@ -104,10 +177,8 @@ export async function createCheckoutSession(env: any, params: CheckoutParams) {
       };
     }
   } else {
-    // Allpay (ECPay) integration template
+    // Allpay (ECPay) integration
     // Required parameters to enforce 3D Secure / SCA validation on Card payments.
-    // ThreeDVal: '1' forces 3D Secure verification flow to avoid chargebacks/fraud.
-    // SCA compliance check enables verified 18+ age verification since only cardholder with authorized access can sign.
     const checkoutQuery = new URLSearchParams({
       provider: 'allpay',
       amount: amount.toString(),
@@ -128,7 +199,7 @@ export async function createCheckoutSession(env: any, params: CheckoutParams) {
  * Handles payment completion webhook notifications.
  * Records the transaction logs and activates paid roles in Supabase.
  */
-export async function handlePaymentWebhook(env: any, provider: 'paypal' | 'allpay', data: any) {
+export async function handlePaymentWebhook(env: any, provider: 'paypal' | 'allpay' | 'paddle', data: any) {
   const supabase = getSupabaseClient(env);
 
   let transactionId = '';

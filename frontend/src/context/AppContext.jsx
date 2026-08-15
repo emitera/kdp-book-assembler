@@ -21,6 +21,7 @@ export const AppProvider = ({ children }) => {
   // Supabase User Auth State
   const [user, setUser] = useState(null);
   const [userProfile, setUserProfile] = useState(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
   const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
 
   // i18n Language & Multi-Currency State
@@ -32,22 +33,45 @@ export const AppProvider = ({ children }) => {
   const [monthlyProPriceUsd, setMonthlyProPriceUsd] = useState(19.99);
   const [yearlySubscriptionPriceUsd, setYearlySubscriptionPriceUsd] = useState(99.99);
 
-  // Fetch pricing dynamically on mount
+  // Dynamic Payment Gateway Settings
+  const [paymentSettings, setPaymentSettings] = useState({
+    active_gateway: 'allpay',
+    paddle_environment: 'sandbox',
+    paddle_client_token: '',
+    paddle_price_onetime: '',
+    paddle_price_monthly: '',
+    paddle_price_yearly: '',
+    allpay_store_id: '',
+    allpay_product_onetime: '',
+    allpay_product_monthly: '',
+    allpay_product_yearly: ''
+  });
+
+  // Fetch pricing & payment settings dynamically on mount
   useEffect(() => {
-    const fetchPricing = async () => {
+    const fetchPricingAndSettings = async () => {
       try {
-        const response = await fetch(`${API_URL}/api/settings`);
-        if (response.ok) {
-          const data = await response.json();
+        const [pricingRes, paymentRes] = await Promise.all([
+          fetch(`${API_URL}/api/settings`),
+          fetch(`${API_URL}/api/payment-settings`)
+        ]);
+
+        if (pricingRes.ok) {
+          const data = await pricingRes.json();
           if (data.one_time_pass_price_usd) setOneTimePassPriceUsd(data.one_time_pass_price_usd);
           if (data.subscription_price_usd) setMonthlyProPriceUsd(data.subscription_price_usd);
           if (data.yearly_subscription_price_usd) setYearlySubscriptionPriceUsd(data.yearly_subscription_price_usd);
         }
+
+        if (paymentRes.ok) {
+          const pData = await paymentRes.json();
+          setPaymentSettings(pData);
+        }
       } catch (err) {
-        console.error('Failed to fetch pricing:', err);
+        console.error('Failed to fetch pricing or payment settings:', err);
       }
     };
-    fetchPricing();
+    fetchPricingAndSettings();
   }, []);
 
   // Exchange Rates (1 USD base)
@@ -158,6 +182,7 @@ export const AppProvider = ({ children }) => {
   const fetchUserProfile = async (currentUser) => {
     if (!currentUser) {
       setUserProfile(null);
+      setIsAuthLoading(false);
       return;
     }
     try {
@@ -171,6 +196,8 @@ export const AppProvider = ({ children }) => {
       }
     } catch (err) {
       console.error('Error fetching user profile:', err);
+    } finally {
+      setIsAuthLoading(false);
     }
   };
 
@@ -179,13 +206,23 @@ export const AppProvider = ({ children }) => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      fetchUserProfile(currentUser);
+      if (currentUser) {
+        fetchUserProfile(currentUser);
+      } else {
+        setUserProfile(null);
+        setIsAuthLoading(false);
+      }
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       const currentUser = session?.user ?? null;
       setUser(currentUser);
-      fetchUserProfile(currentUser);
+      if (currentUser) {
+        fetchUserProfile(currentUser);
+      } else {
+        setUserProfile(null);
+        setIsAuthLoading(false);
+      }
     });
 
     return () => subscription.unsubscribe();
@@ -449,10 +486,16 @@ export const AppProvider = ({ children }) => {
     user,
     setUser,
     userProfile,
+    isAuthLoading,
     fetchUserProfile,
     isAuthModalOpen,
     setIsAuthModalOpen,
     signOut: handleSignOut,
+
+    // Payment Settings & Gateway
+    paymentSettings,
+    setPaymentSettings,
+    activeGateway: paymentSettings?.active_gateway || 'allpay',
 
     // i18n & Currency
     language,

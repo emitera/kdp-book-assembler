@@ -18,13 +18,26 @@ import {
   Trash2,
   X,
   Mail,
-  Lock
+  Lock,
+  CreditCard,
+  Sliders,
+  Key,
+  Globe
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000';
 
 export default function AdminPanel() {
-  const { user, userProfile, setOneTimePassPriceUsd, setMonthlyProPriceUsd, setYearlySubscriptionPriceUsd } = useApp();
+  const { 
+    user, 
+    userProfile, 
+    isAuthLoading, 
+    setOneTimePassPriceUsd, 
+    setMonthlyProPriceUsd, 
+    setYearlySubscriptionPriceUsd,
+    setPaymentSettings 
+  } = useApp();
+
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -37,6 +50,22 @@ export default function AdminPanel() {
   const [yearlyPrice, setYearlyPrice] = useState('99.99');
   const [savingPrice, setSavingPrice] = useState(false);
   const [priceSuccess, setPriceSuccess] = useState(false);
+
+  // Payment Gateways Configuration State
+  const [activeGateway, setActiveGateway] = useState('allpay'); // 'allpay' | 'paddle'
+  const [paddleEnv, setPaddleEnv] = useState('sandbox'); // 'sandbox' | 'production'
+  const [paddleClientToken, setPaddleClientToken] = useState('');
+  const [paddleApiKey, setPaddleApiKey] = useState('');
+  const [paddlePriceOnetime, setPaddlePriceOnetime] = useState('');
+  const [paddlePriceMonthly, setPaddlePriceMonthly] = useState('');
+  const [paddlePriceYearly, setPaddlePriceYearly] = useState('');
+  const [allpayStoreId, setAllpayStoreId] = useState('');
+  const [allpaySecretKey, setAllpaySecretKey] = useState('');
+  const [allpayProductOnetime, setAllpayProductOnetime] = useState('');
+  const [allpayProductMonthly, setAllpayProductMonthly] = useState('');
+  const [allpayProductYearly, setAllpayProductYearly] = useState('');
+  const [savingPaymentSettings, setSavingPaymentSettings] = useState(false);
+  const [paymentSettingsSuccess, setPaymentSettingsSuccess] = useState(false);
 
   // Add User Modal State
   const [isAddUserModalOpen, setIsAddUserModalOpen] = useState(false);
@@ -54,9 +83,10 @@ export default function AdminPanel() {
     setLoading(true);
     setError('');
     try {
-      const [usersRes, settingsRes] = await Promise.all([
+      const [usersRes, settingsRes, paymentRes] = await Promise.all([
         fetch(`${API_URL}/api/admin/users`),
-        fetch(`${API_URL}/api/settings`)
+        fetch(`${API_URL}/api/settings`),
+        fetch(`${API_URL}/api/admin/payment-settings`)
       ]);
 
       if (usersRes.ok) {
@@ -69,6 +99,25 @@ export default function AdminPanel() {
         setOneTimePrice(String(sData.one_time_pass_price_usd ?? '9.99'));
         setSubPrice(String(sData.subscription_price_usd ?? '19.99'));
         setYearlyPrice(String(sData.yearly_subscription_price_usd ?? '99.99'));
+      }
+
+      if (paymentRes.ok) {
+        const pData = await paymentRes.json();
+        if (pData) {
+          setActiveGateway(pData.active_gateway || 'allpay');
+          setPaddleEnv(pData.paddle_environment || 'sandbox');
+          setPaddleClientToken(pData.paddle_client_token || '');
+          setPaddleApiKey(pData.paddle_api_key || '');
+          setPaddlePriceOnetime(pData.paddle_price_onetime || '');
+          setPaddlePriceMonthly(pData.paddle_price_monthly || '');
+          setPaddlePriceYearly(pData.paddle_price_yearly || '');
+          setAllpayStoreId(pData.allpay_store_id || '');
+          setAllpaySecretKey(pData.allpay_secret_key || '');
+          setAllpayProductOnetime(pData.allpay_product_onetime || '');
+          setAllpayProductMonthly(pData.allpay_product_monthly || '');
+          setAllpayProductYearly(pData.allpay_product_yearly || '');
+          if (setPaymentSettings) setPaymentSettings(pData);
+        }
       }
     } catch (err) {
       console.error('Fetch error:', err);
@@ -100,23 +149,70 @@ export default function AdminPanel() {
         })
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to update pricing on server');
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.success) {
+        const errMsg = data.error || data.message || `Server status ${response.status}`;
+        console.error('Server error updating pricing:', errMsg, data);
+        throw new Error(errMsg);
       }
 
-      const data = await response.json();
-      if (data.success) {
-        setOneTimePassPriceUsd(parseFloat(oneTimePrice));
-        setMonthlyProPriceUsd(parseFloat(subPrice));
-        setYearlySubscriptionPriceUsd(parseFloat(yearlyPrice));
-        setPriceSuccess(true);
-        setTimeout(() => setPriceSuccess(false), 3000);
-      }
+      setOneTimePassPriceUsd(parseFloat(oneTimePrice));
+      setMonthlyProPriceUsd(parseFloat(subPrice));
+      setYearlySubscriptionPriceUsd(parseFloat(yearlyPrice));
+      setPriceSuccess(true);
+      setTimeout(() => setPriceSuccess(false), 3000);
     } catch (err) {
-      console.error('Pricing update error:', err);
+      console.error('Pricing update error details:', err);
       alert(`Error updating prices: ${err.message}`);
     } finally {
       setSavingPrice(false);
+    }
+  };
+
+  const handleSavePaymentSettings = async (e) => {
+    e.preventDefault();
+    setSavingPaymentSettings(true);
+    setPaymentSettingsSuccess(false);
+
+    try {
+      const payload = {
+        active_gateway: activeGateway,
+        paddle_environment: paddleEnv,
+        paddle_client_token: paddleClientToken,
+        paddle_api_key: paddleApiKey,
+        paddle_price_onetime: paddlePriceOnetime,
+        paddle_price_monthly: paddlePriceMonthly,
+        paddle_price_yearly: paddlePriceYearly,
+        allpay_store_id: allpayStoreId,
+        allpay_secret_key: allpaySecretKey,
+        allpay_product_onetime: allpayProductOnetime,
+        allpay_product_monthly: allpayProductMonthly,
+        allpay_product_yearly: allpayProductYearly
+      };
+
+      const response = await fetch(`${API_URL}/api/admin/update-payment-settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+
+      const data = await response.json().catch(() => ({}));
+
+      if (!response.ok || !data.success) {
+        const errMsg = data.error || data.message || `Server status ${response.status}`;
+        console.error('Server error updating payment settings:', errMsg, data);
+        throw new Error(errMsg);
+      }
+
+      if (setPaymentSettings) setPaymentSettings(data.settings || payload);
+      setPaymentSettingsSuccess(true);
+      setTimeout(() => setPaymentSettingsSuccess(false), 3000);
+    } catch (err) {
+      console.error('Payment settings update error details:', err);
+      alert(`Error updating payment settings: ${err.message}`);
+    } finally {
+      setSavingPaymentSettings(false);
     }
   };
 
@@ -257,6 +353,17 @@ export default function AdminPanel() {
     u.email?.toLowerCase().includes(searchQuery.toLowerCase()) ||
     u.id?.toLowerCase().includes(searchQuery.toLowerCase())
   );
+
+  if (isAuthLoading) {
+    return (
+      <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6">
+        <div className="flex flex-col items-center gap-4 text-center">
+          <Loader2 className="w-10 h-10 animate-spin text-indigo-500" />
+          <p className="text-sm font-semibold text-slate-300">Проверка прав администратора...</p>
+        </div>
+      </div>
+    );
+  }
 
   if (!isAdmin) {
     return (
@@ -502,6 +609,280 @@ export default function AdminPanel() {
               {savingPrice ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               <span>Save New Prices</span>
             </button>
+          </form>
+        </section>
+
+        {/* Payment Gateways Configuration Card */}
+        <section className="bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
+          <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-100 dark:border-slate-800 gap-3">
+            <div>
+              <h2 className="text-lg font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <CreditCard className="w-5 h-5 text-indigo-500" /> Payment Gateways Configuration / Настройки платежных шлюзов
+              </h2>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                Switch active gateway and configure API keys / Product IDs dynamically without restarting the server.
+              </p>
+            </div>
+            {paymentSettingsSuccess && (
+              <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400 flex items-center gap-1 bg-emerald-50 dark:bg-emerald-950/40 px-3 py-1.5 rounded-xl border border-emerald-200 dark:border-emerald-800">
+                <CheckCircle2 className="w-4 h-4" /> Gateway Settings Saved!
+              </span>
+            )}
+          </div>
+
+          <form onSubmit={handleSavePaymentSettings} className="space-y-6">
+            {/* 1. Active Gateway Selector */}
+            <div className="space-y-2">
+              <label className="text-xs font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+                Active Payment Gateway / Активная платежная система
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {/* Allpay Card Option */}
+                <div
+                  onClick={() => setActiveGateway('allpay')}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
+                    activeGateway === 'allpay'
+                      ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/20 shadow-sm'
+                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-950/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl ${activeGateway === 'allpay' ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+                      <CreditCard className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        Allpay Gateway
+                        {activeGateway === 'allpay' && (
+                          <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Direct Card Payments / 3D Secure Verification</p>
+                    </div>
+                  </div>
+                  <input
+                    type="radio"
+                    name="activeGatewayRadio"
+                    value="allpay"
+                    checked={activeGateway === 'allpay'}
+                    onChange={() => setActiveGateway('allpay')}
+                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
+                  />
+                </div>
+
+                {/* Paddle Card Option */}
+                <div
+                  onClick={() => setActiveGateway('paddle')}
+                  className={`p-4 rounded-2xl border-2 cursor-pointer transition-all flex items-center justify-between ${
+                    activeGateway === 'paddle'
+                      ? 'border-indigo-600 bg-indigo-50/50 dark:bg-indigo-950/20 shadow-sm'
+                      : 'border-slate-200 dark:border-slate-800 hover:border-slate-300 dark:hover:border-slate-700 bg-slate-50/50 dark:bg-slate-950/50'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`p-2.5 rounded-xl ${activeGateway === 'paddle' ? 'bg-indigo-600 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400'}`}>
+                      <Globe className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                        Paddle Billing
+                        {activeGateway === 'paddle' && (
+                          <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 bg-indigo-100 dark:bg-indigo-900 text-indigo-700 dark:text-indigo-300 rounded-full">
+                            Active
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[11px] text-slate-500 dark:text-slate-400">Global Merchant of Record (MoR) / Tax Compliance</p>
+                    </div>
+                  </div>
+                  <input
+                    type="radio"
+                    name="activeGatewayRadio"
+                    value="paddle"
+                    checked={activeGateway === 'paddle'}
+                    onChange={() => setActiveGateway('paddle')}
+                    className="w-4 h-4 text-indigo-600 focus:ring-indigo-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* 2. Gateway Settings Grids */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 pt-2">
+              {/* Allpay Configuration Block */}
+              <div className={`p-5 rounded-2xl border transition-all space-y-4 ${
+                activeGateway === 'allpay'
+                  ? 'border-indigo-300 dark:border-indigo-800 bg-indigo-50/20 dark:bg-indigo-950/10'
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/40 opacity-80 hover:opacity-100'
+              }`}>
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-slate-800">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <CreditCard className="w-4 h-4 text-indigo-500" /> Allpay Settings
+                  </h3>
+                  {activeGateway === 'allpay' && (
+                    <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 px-2 py-0.5 rounded-full">
+                      ● Active Gateway
+                    </span>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Allpay Store ID</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 2000132"
+                      value={allpayStoreId}
+                      onChange={(e) => setAllpayStoreId(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Allpay Secret Key</label>
+                    <input
+                      type="password"
+                      placeholder="Secret Key / HashKey"
+                      value={allpaySecretKey}
+                      onChange={(e) => setAllpaySecretKey(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">One-Time Pass Product ID</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. PROD_ONETIME_PASS"
+                      value={allpayProductOnetime}
+                      onChange={(e) => setAllpayProductOnetime(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Monthly Pro Product ID</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. PROD_MONTHLY_SUB"
+                      value={allpayProductMonthly}
+                      onChange={(e) => setAllpayProductMonthly(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Yearly Pro Product ID</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. PROD_YEARLY_SUB"
+                      value={allpayProductYearly}
+                      onChange={(e) => setAllpayProductYearly(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Paddle Configuration Block */}
+              <div className={`p-5 rounded-2xl border transition-all space-y-4 ${
+                activeGateway === 'paddle'
+                  ? 'border-indigo-300 dark:border-indigo-800 bg-indigo-50/20 dark:bg-indigo-950/10'
+                  : 'border-slate-200 dark:border-slate-800 bg-slate-50/40 dark:bg-slate-950/40 opacity-80 hover:opacity-100'
+              }`}>
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200/60 dark:border-slate-800">
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                    <Globe className="w-4 h-4 text-indigo-500" /> Paddle Settings
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <select
+                      value={paddleEnv}
+                      onChange={(e) => setPaddleEnv(e.target.value)}
+                      className="text-[10px] font-bold px-2 py-0.5 rounded-lg border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 text-slate-700 dark:text-slate-300 cursor-pointer"
+                    >
+                      <option value="sandbox">Sandbox / Test</option>
+                      <option value="production">Production / Live</option>
+                    </select>
+                    {activeGateway === 'paddle' && (
+                      <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 bg-indigo-100 dark:bg-indigo-900/50 px-2 py-0.5 rounded-full">
+                        ● Active Gateway
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Paddle Client Token</label>
+                    <input
+                      type="text"
+                      placeholder="test_... or live_..."
+                      value={paddleClientToken}
+                      onChange={(e) => setPaddleClientToken(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Paddle API Key</label>
+                    <input
+                      type="password"
+                      placeholder="paddlev2_..."
+                      value={paddleApiKey}
+                      onChange={(e) => setPaddleApiKey(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">One-Time Pass Price ID</label>
+                    <input
+                      type="text"
+                      placeholder="pri_01h..."
+                      value={paddlePriceOnetime}
+                      onChange={(e) => setPaddlePriceOnetime(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Monthly Pro Price ID</label>
+                    <input
+                      type="text"
+                      placeholder="pri_01h..."
+                      value={paddlePriceMonthly}
+                      onChange={(e) => setPaddlePriceMonthly(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+
+                  <div className="space-y-1 sm:col-span-2">
+                    <label className="text-[11px] font-semibold text-slate-600 dark:text-slate-400">Yearly Pro Price ID</label>
+                    <input
+                      type="text"
+                      placeholder="pri_01h..."
+                      value={paddlePriceYearly}
+                      onChange={(e) => setPaddlePriceYearly(e.target.value)}
+                      className="w-full px-3.5 py-2 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-xl text-xs font-mono focus:outline-none focus:border-indigo-500"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Save Button */}
+            <div className="flex justify-end pt-2">
+              <button
+                type="submit"
+                disabled={savingPaymentSettings}
+                className="py-2.5 px-6 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-sm font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer h-[42px]"
+              >
+                {savingPaymentSettings ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                <span>Save Payment Settings / Сохранить настройки платежей</span>
+              </button>
+            </div>
           </form>
         </section>
 

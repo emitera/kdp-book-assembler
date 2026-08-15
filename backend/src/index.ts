@@ -450,6 +450,141 @@ app.get('/api/settings', async (c) => {
 });
 
 /**
+ * Public API: Fetch dynamic payment gateway settings (for client checkout)
+ * GET /api/payment-settings
+ */
+app.get('/api/payment-settings', async (c) => {
+  try {
+    const supabase = getSupabaseClient(c.env);
+    const { data: settings, error } = await supabase
+      .from('payment_settings')
+      .select('active_gateway, paddle_environment, paddle_client_token, paddle_price_onetime, paddle_price_monthly, paddle_price_yearly, allpay_store_id, allpay_product_onetime, allpay_product_monthly, allpay_product_yearly')
+      .eq('id', 'global')
+      .single();
+
+    if (error) {
+      console.warn('Could not fetch payment_settings, returning defaults:', error.message);
+      return c.json({
+        active_gateway: 'allpay',
+        paddle_environment: 'sandbox',
+        paddle_client_token: '',
+        paddle_price_onetime: '',
+        paddle_price_monthly: '',
+        paddle_price_yearly: '',
+        allpay_store_id: '',
+        allpay_product_onetime: '',
+        allpay_product_monthly: '',
+        allpay_product_yearly: ''
+      });
+    }
+
+    return c.json(settings || {
+      active_gateway: 'allpay',
+      paddle_environment: 'sandbox'
+    });
+  } catch (err: any) {
+    console.error('Error in /api/payment-settings:', err);
+    return c.json({ active_gateway: 'allpay', paddle_environment: 'sandbox' });
+  }
+});
+
+/**
+ * Admin API: Fetch full dynamic payment gateway settings (including API keys)
+ * GET /api/admin/payment-settings
+ */
+app.get('/api/admin/payment-settings', async (c) => {
+  try {
+    const supabase = getSupabaseClient(c.env);
+    const { data: settings, error } = await supabase
+      .from('payment_settings')
+      .select('*')
+      .eq('id', 'global')
+      .single();
+
+    if (error) {
+      console.error('Error fetching admin payment settings:', error.message);
+      return c.json({
+        active_gateway: 'allpay',
+        paddle_environment: 'sandbox',
+        paddle_client_token: '',
+        paddle_api_key: '',
+        paddle_price_onetime: '',
+        paddle_price_monthly: '',
+        paddle_price_yearly: '',
+        allpay_store_id: '',
+        allpay_secret_key: '',
+        allpay_product_onetime: '',
+        allpay_product_monthly: '',
+        allpay_product_yearly: ''
+      });
+    }
+
+    return c.json(settings);
+  } catch (err: any) {
+    console.error('Admin payment settings fetch error:', err);
+    return c.json({ error: err.message || 'Failed to fetch payment settings' }, 500);
+  }
+});
+
+/**
+ * Admin API: Update dynamic payment gateway settings
+ * POST /api/admin/update-payment-settings
+ */
+app.post('/api/admin/update-payment-settings', async (c) => {
+  try {
+    const body = await c.req.json();
+    const {
+      active_gateway,
+      paddle_environment,
+      paddle_client_token,
+      paddle_api_key,
+      paddle_price_onetime,
+      paddle_price_monthly,
+      paddle_price_yearly,
+      allpay_store_id,
+      allpay_secret_key,
+      allpay_product_onetime,
+      allpay_product_monthly,
+      allpay_product_yearly
+    } = body;
+
+    const supabase = getSupabaseClient(c.env);
+    const payload = {
+      id: 'global',
+      active_gateway: active_gateway || 'allpay',
+      paddle_environment: paddle_environment || 'sandbox',
+      paddle_client_token: paddle_client_token ?? '',
+      paddle_api_key: paddle_api_key ?? '',
+      paddle_price_onetime: paddle_price_onetime ?? '',
+      paddle_price_monthly: paddle_price_monthly ?? '',
+      paddle_price_yearly: paddle_price_yearly ?? '',
+      allpay_store_id: allpay_store_id ?? '',
+      allpay_secret_key: allpay_secret_key ?? '',
+      allpay_product_onetime: allpay_product_onetime ?? '',
+      allpay_product_monthly: allpay_product_monthly ?? '',
+      allpay_product_yearly: allpay_product_yearly ?? '',
+      updated_at: new Date().toISOString()
+    };
+
+    const { data: updated, error } = await supabase
+      .from('payment_settings')
+      .upsert(payload)
+      .select()
+      .single();
+
+    if (error) {
+      console.error('Supabase error updating payment_settings:', error);
+      return c.json({ error: error.message || 'Database error updating payment settings' }, 500);
+    }
+
+    return c.json({ success: true, settings: updated });
+  } catch (err: any) {
+    console.error('Server error updating payment settings:', err);
+    return c.json({ error: err.message || 'Failed to update payment settings' }, 500);
+  }
+});
+
+/**
  * Admin API: Update dynamic app pricing
  * POST /api/admin/update-pricing
  */
@@ -459,25 +594,44 @@ app.post('/api/admin/update-pricing', async (c) => {
     const { oneTimePassPriceUsd, subscriptionPriceUsd, yearlySubscriptionPriceUsd } = body;
 
     const supabase = getSupabaseClient(c.env);
+    const pricingPayload = {
+      id: 'global',
+      one_time_pass_price_usd: parseFloat(oneTimePassPriceUsd),
+      subscription_price_usd: parseFloat(subscriptionPriceUsd),
+      yearly_subscription_price_usd: parseFloat(yearlySubscriptionPriceUsd),
+      updated_at: new Date().toISOString()
+    };
+
+    // Update app_settings table
     const { data: updated, error } = await supabase
       .from('app_settings')
-      .upsert({
-        id: 'global',
-        one_time_pass_price_usd: parseFloat(oneTimePassPriceUsd),
-        subscription_price_usd: parseFloat(subscriptionPriceUsd),
-        yearly_subscription_price_usd: parseFloat(yearlySubscriptionPriceUsd),
-        updated_at: new Date().toISOString()
-      })
+      .upsert(pricingPayload)
       .select()
       .single();
 
     if (error) {
-      return c.json({ error: error.message }, 500);
+      console.error('Supabase error updating app_settings:', error);
+      // Fallback try pricing_plans table
+      const { data: pUpdated, error: pError } = await supabase
+        .from('pricing_plans')
+        .upsert(pricingPayload)
+        .select()
+        .single();
+      
+      if (pError) {
+        console.error('Supabase error updating pricing_plans fallback:', pError);
+        return c.json({ error: error.message || pError.message || 'Failed to update pricing in database' }, 500);
+      }
+      return c.json({ success: true, settings: pUpdated });
     }
+
+    // Also update pricing_plans if it exists for sync
+    await supabase.from('pricing_plans').upsert(pricingPayload).catch(() => {});
 
     return c.json({ success: true, settings: updated });
   } catch (err: any) {
-    return c.json({ error: err.message || 'Failed to update pricing' }, 500);
+    console.error('Server exception updating pricing:', err);
+    return c.json({ error: err.message || 'Failed to update pricing on server' }, 500);
   }
 });
 
