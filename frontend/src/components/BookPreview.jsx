@@ -1287,21 +1287,27 @@ export default function BookPreview() {
                 >
                   {/* Page 1 (Front Cover) */}
                   {coverType === 'full' && fullCover ? (() => {
-                    // For 3D mode, the full cover image needs to be shown with its right half (front cover)
+                    // For 3D mode, the full cover image shows its right half (front cover)
                     // Container is the FlipBook page size (previewWidth x previewHeight)
-                    // The full cover spans: back + spine + front, but we only show the front half
-                    const coverWidthInches = (activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * 2 + spineWidth;
+                    const singleCoverWidthIn = activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125);
+                    const coverWidthInches = (singleCoverWidthIn * 2) + spineWidth;
                     const coverHeightIn = bindingType === 'hardcover' 
                       ? activeTrimSize.height + (0.591 * 2) 
                       : activeTrimSize.height + 0.25;
-                    // Scale ratio: how the FlipBook page relates to the full cover
-                    const flipScale = previewWidth / ((activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * (previewHeight / coverHeightIn));
-                    const fullCoverPxWidth = coverWidthInches * (previewHeight / coverHeightIn);
+
+                    const scaleFactor = previewHeight / coverHeightIn;
+                    const fullCoverPxWidth = coverWidthInches * scaleFactor;
                     const fullCoverPxHeight = previewHeight;
-                    // Offset to shift the image left so only the right half (front cover) is visible
-                    const backCoverPxWidth = (activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * (previewHeight / coverHeightIn);
-                    const spinePx = spineWidth * (previewHeight / coverHeightIn);
+                    const backCoverPxWidth = singleCoverWidthIn * scaleFactor;
+                    const spinePx = spineWidth * scaleFactor;
+                    
+                    // Shift left by back cover width + spine width so front cover starts at container x=0
                     const shiftX = -(backCoverPxWidth + spinePx);
+                    const userOffsetX = ((fullCover.xOffset || 0) / 72) * scaleFactor;
+                    const userOffsetY = ((fullCover.yOffset || 0) / 72) * scaleFactor;
+                    const xScale = fullCover.xScale || 1.0;
+                    const yScale = fullCover.yScale || 1.0;
+
                     return (
                       <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
                         <img
@@ -1309,14 +1315,16 @@ export default function BookPreview() {
                           alt="Front Cover"
                           style={{
                             position: 'absolute',
-                            left: `${shiftX + (previewWidth - fullCoverPxWidth) / 2}px`,
-                            top: '0px',
+                            left: `${shiftX + userOffsetX}px`,
+                            top: `${userOffsetY}px`,
                             width: `${fullCoverPxWidth}px`,
                             height: `${fullCoverPxHeight}px`,
                             maxWidth: 'none',
                             maxHeight: 'none',
                             pointerEvents: 'none',
-                            objectFit: 'fill'
+                            objectFit: 'fill',
+                            transform: `scale(${xScale}, ${yScale})`,
+                            transformOrigin: `${backCoverPxWidth + spinePx + (backCoverPxWidth / 2)}px center`
                           }}
                         />
                       </div>
@@ -1393,12 +1401,23 @@ export default function BookPreview() {
                   {/* Page N (Back Cover) */}
                   {coverType === 'full' && fullCover ? (() => {
                     // Show the left portion (back cover) of the full cover image
+                    const singleCoverWidthIn = activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125);
+                    const coverWidthInches = (singleCoverWidthIn * 2) + spineWidth;
                     const coverHeightIn = bindingType === 'hardcover' 
                       ? activeTrimSize.height + (0.591 * 2) 
                       : activeTrimSize.height + 0.25;
-                    const coverWidthInches = (activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * 2 + spineWidth;
-                    const fullCoverPxWidth = coverWidthInches * (previewHeight / coverHeightIn);
+
+                    const scaleFactor = previewHeight / coverHeightIn;
+                    const fullCoverPxWidth = coverWidthInches * scaleFactor;
                     const fullCoverPxHeight = previewHeight;
+                    const backCoverPxWidth = singleCoverWidthIn * scaleFactor;
+
+                    const userOffsetX = ((fullCover.xOffset || 0) / 72) * scaleFactor;
+                    const userOffsetY = ((fullCover.yOffset || 0) / 72) * scaleFactor;
+                    const xScale = fullCover.xScale || 1.0;
+                    const yScale = fullCover.yScale || 1.0;
+
+                    // Back cover starts at image left=0 and aligns with the container left edge (x=0)
                     return (
                       <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
                         <img
@@ -1406,14 +1425,16 @@ export default function BookPreview() {
                           alt="Back Cover"
                           style={{
                             position: 'absolute',
-                            left: `${(previewWidth - fullCoverPxWidth) / 2}px`,
-                            top: '0px',
+                            left: `${userOffsetX}px`,
+                            top: `${userOffsetY}px`,
                             width: `${fullCoverPxWidth}px`,
                             height: `${fullCoverPxHeight}px`,
                             maxWidth: 'none',
                             maxHeight: 'none',
                             pointerEvents: 'none',
-                            objectFit: 'fill'
+                            objectFit: 'fill',
+                            transform: `scale(${xScale}, ${yScale})`,
+                            transformOrigin: `${backCoverPxWidth / 2}px center`
                           }}
                         />
                       </div>
