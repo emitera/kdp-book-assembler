@@ -183,7 +183,7 @@ export const AppProvider = ({ children }) => {
     if (!currentUser) {
       setUserProfile(null);
       setIsAuthLoading(false);
-      return;
+      return null;
     }
     try {
       const { data: profile } = await supabase
@@ -193,39 +193,43 @@ export const AppProvider = ({ children }) => {
         .single();
       if (profile) {
         setUserProfile(profile);
+        return profile;
       }
     } catch (err) {
       console.error('Error fetching user profile:', err);
     } finally {
       setIsAuthLoading(false);
     }
+    return null;
   };
 
   // Listen to Supabase Auth State Changes
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      const currentUser = session?.user ?? null;
+    let isSubscribed = true;
+
+    const handleAuth = async (currentUser) => {
+      if (!isSubscribed) return;
       setUser(currentUser);
       if (currentUser) {
-        fetchUserProfile(currentUser);
+        await fetchUserProfile(currentUser);
       } else {
         setUserProfile(null);
-        setIsAuthLoading(false);
+        if (isSubscribed) setIsAuthLoading(false);
       }
+    };
+
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      handleAuth(session?.user ?? null);
     });
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      const currentUser = session?.user ?? null;
-      setUser(currentUser);
-      if (currentUser) {
-        fetchUserProfile(currentUser);
-      } else {
-        setUserProfile(null);
-        setIsAuthLoading(false);
-      }
+      handleAuth(session?.user ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      isSubscribed = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   // Sync i18n Language Changes

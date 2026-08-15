@@ -354,7 +354,7 @@ export default function AdminPanel() {
     u.id?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  if (isAuthLoading) {
+  if (isAuthLoading || (user && !userProfile)) {
     return (
       <div className="min-h-screen bg-slate-900 text-white flex flex-col items-center justify-center p-6">
         <div className="flex flex-col items-center gap-4 text-center">

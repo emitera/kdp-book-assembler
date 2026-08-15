@@ -1,13 +1,17 @@
--- Migration Phase 12: Payment Settings & Pricing Tables with Full RLS Policies
+-- Migration Phase 12 (Universal & Safe): Payment Settings & Pricing Tables with Full RLS Policies
 
--- 1. Ensure app_settings exists and has robust RLS
+-- ==============================================================================
+-- 1. APP_SETTINGS (Safely create table and add any missing columns)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.app_settings (
-  id TEXT PRIMARY KEY DEFAULT 'global',
-  one_time_pass_price_usd NUMERIC(10, 2) DEFAULT 9.99,
-  subscription_price_usd NUMERIC(10, 2) DEFAULT 19.99,
-  yearly_subscription_price_usd NUMERIC(10, 2) DEFAULT 99.99,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  id TEXT PRIMARY KEY DEFAULT 'global'
 );
+
+ALTER TABLE public.app_settings 
+  ADD COLUMN IF NOT EXISTS one_time_pass_price_usd NUMERIC(10, 2) DEFAULT 9.99,
+  ADD COLUMN IF NOT EXISTS subscription_price_usd NUMERIC(10, 2) DEFAULT 19.99,
+  ADD COLUMN IF NOT EXISTS yearly_subscription_price_usd NUMERIC(10, 2) DEFAULT 99.99,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now());
 
 ALTER TABLE public.app_settings ENABLE ROW LEVEL SECURITY;
 
@@ -32,20 +36,25 @@ CREATE POLICY "Admins update app settings"
     )
   );
 
--- Seed default app_settings
+-- Seed / update default app_settings
 INSERT INTO public.app_settings (id, one_time_pass_price_usd, subscription_price_usd, yearly_subscription_price_usd)
 VALUES ('global', 9.99, 19.99, 99.99)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  yearly_subscription_price_usd = COALESCE(public.app_settings.yearly_subscription_price_usd, 99.99);
 
 
--- 2. Create pricing_plans table (supporting both naming conventions)
+-- ==============================================================================
+-- 2. PRICING_PLANS (Safely create table and add any missing columns)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.pricing_plans (
-  id TEXT PRIMARY KEY DEFAULT 'global',
-  one_time_pass_price_usd NUMERIC(10, 2) DEFAULT 9.99,
-  subscription_price_usd NUMERIC(10, 2) DEFAULT 19.99,
-  yearly_subscription_price_usd NUMERIC(10, 2) DEFAULT 99.99,
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  id TEXT PRIMARY KEY DEFAULT 'global'
 );
+
+ALTER TABLE public.pricing_plans 
+  ADD COLUMN IF NOT EXISTS one_time_pass_price_usd NUMERIC(10, 2) DEFAULT 9.99,
+  ADD COLUMN IF NOT EXISTS subscription_price_usd NUMERIC(10, 2) DEFAULT 19.99,
+  ADD COLUMN IF NOT EXISTS yearly_subscription_price_usd NUMERIC(10, 2) DEFAULT 99.99,
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now());
 
 ALTER TABLE public.pricing_plans ENABLE ROW LEVEL SECURITY;
 
@@ -70,33 +79,34 @@ CREATE POLICY "Admins update pricing plans"
     )
   );
 
+-- Seed / update default pricing_plans
 INSERT INTO public.pricing_plans (id, one_time_pass_price_usd, subscription_price_usd, yearly_subscription_price_usd)
 VALUES ('global', 9.99, 19.99, 99.99)
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE SET
+  yearly_subscription_price_usd = COALESCE(public.pricing_plans.yearly_subscription_price_usd, 99.99);
 
 
--- 3. Create payment_settings table for dynamic gateway configuration
+-- ==============================================================================
+-- 3. PAYMENT_SETTINGS (Dynamic Gateways for Allpay & Paddle)
+-- ==============================================================================
 CREATE TABLE IF NOT EXISTS public.payment_settings (
-  id TEXT PRIMARY KEY DEFAULT 'global',
-  active_gateway TEXT DEFAULT 'allpay', -- 'allpay' | 'paddle'
-  
-  -- Paddle Configuration
-  paddle_environment TEXT DEFAULT 'sandbox', -- 'sandbox' | 'production'
-  paddle_client_token TEXT DEFAULT '',
-  paddle_api_key TEXT DEFAULT '',
-  paddle_price_onetime TEXT DEFAULT '',
-  paddle_price_monthly TEXT DEFAULT '',
-  paddle_price_yearly TEXT DEFAULT '',
-  
-  -- Allpay Configuration
-  allpay_store_id TEXT DEFAULT '',
-  allpay_secret_key TEXT DEFAULT '',
-  allpay_product_onetime TEXT DEFAULT '',
-  allpay_product_monthly TEXT DEFAULT '',
-  allpay_product_yearly TEXT DEFAULT '',
-  
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+  id TEXT PRIMARY KEY DEFAULT 'global'
 );
+
+ALTER TABLE public.payment_settings 
+  ADD COLUMN IF NOT EXISTS active_gateway TEXT DEFAULT 'allpay',
+  ADD COLUMN IF NOT EXISTS paddle_environment TEXT DEFAULT 'sandbox',
+  ADD COLUMN IF NOT EXISTS paddle_client_token TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS paddle_api_key TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS paddle_price_onetime TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS paddle_price_monthly TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS paddle_price_yearly TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS allpay_store_id TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS allpay_secret_key TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS allpay_product_onetime TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS allpay_product_monthly TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS allpay_product_yearly TEXT DEFAULT '',
+  ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now());
 
 ALTER TABLE public.payment_settings ENABLE ROW LEVEL SECURITY;
 
