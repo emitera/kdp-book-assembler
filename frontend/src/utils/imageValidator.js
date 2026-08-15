@@ -83,14 +83,14 @@ export function resizeImageToFit(file, targetWidthPx, targetHeightPx) {
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, targetWidthPx, targetHeightPx);
 
-      // 2. Compute object-fit: contain scale and center offsets
-      const scale = Math.min(targetWidthPx / img.naturalWidth, targetHeightPx / img.naturalHeight);
+      // 2. Compute object-fit: cover scale and center offsets (fills entire canvas, crops excess)
+      const scale = Math.max(targetWidthPx / img.naturalWidth, targetHeightPx / img.naturalHeight);
       const drawWidth = img.naturalWidth * scale;
       const drawHeight = img.naturalHeight * scale;
       const offsetX = (targetWidthPx - drawWidth) / 2;
       const offsetY = (targetHeightPx - drawHeight) / 2;
 
-      // 3. Draw image centered
+      // 3. Draw image centered (excess is cropped by canvas bounds)
       ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 
       // 4. Export to Blob as JPEG (high quality)

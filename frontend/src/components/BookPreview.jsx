@@ -1286,23 +1286,42 @@ export default function BookPreview() {
                   ref={flipBookRef}
                 >
                   {/* Page 1 (Front Cover) */}
-                  {coverType === 'full' && fullCover ? (
-                    <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
-                      {/* Left align image but translate by front-cover offset */}
-                      <PreviewImage
-                        src={fullCover.preview}
-                        xScale={fullCover.xScale}
-                        yScale={fullCover.yScale}
-                        xOffset={fullCover.xOffset - (activeTrimSize.width + spineWidth + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * 2 * 72}
-                        yOffset={fullCover.yOffset}
-                        containerWidth={coverPagePxWidth * 2 + spinePxWidth}
-                        containerHeight={coverPreviewHeight}
-                        isDragging={false}
-                        isBleedEnabled={true}
-                        isCover={true}
-                      />
-                    </div>
-                  ) : frontCover ? (
+                  {coverType === 'full' && fullCover ? (() => {
+                    // For 3D mode, the full cover image needs to be shown with its right half (front cover)
+                    // Container is the FlipBook page size (previewWidth x previewHeight)
+                    // The full cover spans: back + spine + front, but we only show the front half
+                    const coverWidthInches = (activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * 2 + spineWidth;
+                    const coverHeightIn = bindingType === 'hardcover' 
+                      ? activeTrimSize.height + (0.591 * 2) 
+                      : activeTrimSize.height + 0.25;
+                    // Scale ratio: how the FlipBook page relates to the full cover
+                    const flipScale = previewWidth / ((activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * (previewHeight / coverHeightIn));
+                    const fullCoverPxWidth = coverWidthInches * (previewHeight / coverHeightIn);
+                    const fullCoverPxHeight = previewHeight;
+                    // Offset to shift the image left so only the right half (front cover) is visible
+                    const backCoverPxWidth = (activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * (previewHeight / coverHeightIn);
+                    const spinePx = spineWidth * (previewHeight / coverHeightIn);
+                    const shiftX = -(backCoverPxWidth + spinePx);
+                    return (
+                      <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
+                        <img
+                          src={fullCover.preview}
+                          alt="Front Cover"
+                          style={{
+                            position: 'absolute',
+                            left: `${shiftX + (previewWidth - fullCoverPxWidth) / 2}px`,
+                            top: '0px',
+                            width: `${fullCoverPxWidth}px`,
+                            height: `${fullCoverPxHeight}px`,
+                            maxWidth: 'none',
+                            maxHeight: 'none',
+                            pointerEvents: 'none',
+                            objectFit: 'fill'
+                          }}
+                        />
+                      </div>
+                    );
+                  })() : frontCover ? (
                     <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
                       <PreviewImage
                         src={frontCover.preview}
@@ -1372,23 +1391,34 @@ export default function BookPreview() {
                   </div>
 
                   {/* Page N (Back Cover) */}
-                  {coverType === 'full' && fullCover ? (
-                    <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
-                      {/* Left align image (shows back cover half naturally) */}
-                      <PreviewImage
-                        src={fullCover.preview}
-                        xScale={fullCover.xScale}
-                        yScale={fullCover.yScale}
-                        xOffset={fullCover.xOffset}
-                        yOffset={fullCover.yOffset}
-                        containerWidth={coverPagePxWidth * 2 + spinePxWidth}
-                        containerHeight={coverPreviewHeight}
-                        isDragging={false}
-                        isBleedEnabled={true}
-                        isCover={true}
-                      />
-                    </div>
-                  ) : backCover ? (
+                  {coverType === 'full' && fullCover ? (() => {
+                    // Show the left portion (back cover) of the full cover image
+                    const coverHeightIn = bindingType === 'hardcover' 
+                      ? activeTrimSize.height + (0.591 * 2) 
+                      : activeTrimSize.height + 0.25;
+                    const coverWidthInches = (activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * 2 + spineWidth;
+                    const fullCoverPxWidth = coverWidthInches * (previewHeight / coverHeightIn);
+                    const fullCoverPxHeight = previewHeight;
+                    return (
+                      <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
+                        <img
+                          src={fullCover.preview}
+                          alt="Back Cover"
+                          style={{
+                            position: 'absolute',
+                            left: `${(previewWidth - fullCoverPxWidth) / 2}px`,
+                            top: '0px',
+                            width: `${fullCoverPxWidth}px`,
+                            height: `${fullCoverPxHeight}px`,
+                            maxWidth: 'none',
+                            maxHeight: 'none',
+                            pointerEvents: 'none',
+                            objectFit: 'fill'
+                          }}
+                        />
+                      </div>
+                    );
+                  })() : backCover ? (
                     <div className="bg-white relative h-full w-full overflow-hidden border border-slate-200">
                       <PreviewImage
                         src={backCover.preview}
