@@ -1,6 +1,6 @@
 # Refund and Cancellation Policy
 
-**Last Updated:** July 2026
+**Last Updated:** August 2026
 
 Birdy Pages (operated by emITera) strives to provide a flawless experience for KDP authors. Because our Service provides digital goods and immediate access to premium features, our refund policy is structured as follows, in accordance with applicable consumer protection laws.
 
@@ -19,5 +19,15 @@ To claim this:
 2. Provide screenshots of the specific error message provided by the Amazon KDP previewer.
 3. Upon verification, you may choose between a **Full Refund** of the One-Time Pass fee or a **Free Generation Credit** once our support team resolves the technical issue.
 
-## 3. Billing Descriptor
-Please be aware that all purchases are processed by our parent legal entity. The charge on your bank or credit card statement will appear as **Birdy Pages** or **emITera**. We do not issue refunds for "unrecognized charges" if they originate from emITera or Birdy Pages for the use of our Service.
+## 3. Refund Processing by Payment Gateway
+Refund requests and cancellations are processed in accordance with the specific payment gateway used at the time of purchase:
+
+* **Transactions via Paddle (Merchant of Record):** For orders completed through Paddle, refunds can be requested by contacting our support team at **support@birdypages.io** or through Paddle's buyer support. As the Merchant of Record, the final verification, financial transaction processing, and return of funds to your original payment method are handled securely through Paddle's infrastructure.
+* **Transactions via Allpay:** For orders completed through Allpay, refunds are processed directly by emITera through Allpay's processing gateway back to the original card used.
+
+## 4. Billing Descriptor
+Please be aware of how charges will appear on your bank or credit card statement:
+* **Allpay Transactions:** Appears as **Birdy Pages** or **emITera**.
+* **Paddle Transactions:** Appears as **PADDLE.NET * BIRDYPAGES** or **PADDLE.NET**.
+
+We do not issue refunds for "unrecognized charges" if they correspond to an active subscription or verified license pass purchase on Birdy Pages.
