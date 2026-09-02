@@ -2,7 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import HTMLFlipBook from 'react-pageflip';
 import { useApp } from '../context/AppContext';
 import { useTranslation } from 'react-i18next';
-import { calculateSpineWidth, calculateCoverDimensions } from '../utils/kdpMath';
+import { calculateSpineWidth, calculateCoverDimensions, calculateInteriorDimensions } from '../utils/kdpMath';
 import { Eye, BookOpen, AlertTriangle, Layers, Book, Move, Sliders, Check, Lock, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
 
 const InputField = ({ value, onChange, min, max, step }) => {
@@ -43,62 +43,38 @@ const InputField = ({ value, onChange, min, max, step }) => {
 };
 
 const ResizeHandles = ({
-  xScale,
-  yScale,
-  xOffset,
-  yOffset,
+  xScale = 1.0,
+  yScale = 1.0,
+  xOffset = 0,
+  yOffset = 0,
   containerWidth,
   containerHeight,
-  isBleedEnabled = false,
-  isCover = false,
-  isOdd = false,
   aspectRatio,
   onResizeStart
 }) => {
   if (!aspectRatio) return null;
 
-  const { activeTrimSize } = useApp();
-  let targetW = containerWidth;
-  let targetH = containerHeight;
-  let targetXOffset = 0;
-  let targetYOffset = 0;
-
-  if (!isCover && !isBleedEnabled) {
-    const scaleFactor = containerWidth / activeTrimSize.width;
-    const marginGutter = 0.375 * scaleFactor;
-    const marginOutside = 0.25 * scaleFactor;
-    const marginTop = 0.25 * (containerHeight / activeTrimSize.height);
-    const marginBottom = 0.25 * (containerHeight / activeTrimSize.height);
-
-    targetW = containerWidth - (marginGutter + marginOutside);
-    targetH = containerHeight - (marginTop + marginBottom);
-
-    const marginLeft = isOdd ? marginGutter : marginOutside;
-    targetXOffset = marginLeft - (containerWidth - targetW) / 2;
-    targetYOffset = marginBottom - (containerHeight - targetH) / 2;
-  }
-
-  const containerRatio = targetW / targetH;
+  const containerRatio = containerWidth / containerHeight;
   let imgWidth, imgHeight;
   if (aspectRatio > containerRatio) {
-    imgWidth = targetW;
-    imgHeight = targetW / aspectRatio;
+    imgWidth = containerWidth;
+    imgHeight = containerWidth / aspectRatio;
   } else {
-    imgHeight = targetH;
-    imgWidth = targetH * aspectRatio;
+    imgHeight = containerHeight;
+    imgWidth = containerHeight * aspectRatio;
   }
 
   const w_box = imgWidth * xScale;
   const h_box = imgHeight * yScale;
-  const cx = containerWidth / 2 + targetXOffset + (xOffset / 2);
-  const cy = containerHeight / 2 + targetYOffset + (yOffset / 2);
+  const cx = containerWidth / 2 + (xOffset / 2);
+  const cy = containerHeight / 2 + (yOffset / 2);
 
   const left = cx - w_box / 2;
   const top = cy - h_box / 2;
 
   return (
     <div 
-      className="absolute border-2 border-indigo-500/80 border-dashed pointer-events-none z-30"
+      className="absolute border-2 border-indigo-500 pointer-events-none z-30"
       style={{
         left: `${left}px`,
         top: `${top}px`,
@@ -139,13 +115,9 @@ const PreviewImage = ({
   containerWidth, 
   containerHeight, 
   isDragging = false,
-  isBleedEnabled = false,
-  isCover = false,
-  isOdd = false,
   isSelected = false,
   onResizeStart = null
 }) => {
-  const { activeTrimSize } = useApp();
   const [aspectRatio, setAspectRatio] = useState(null);
 
   const handleImageLoad = (e) => {
@@ -166,35 +138,15 @@ const PreviewImage = ({
     );
   }
 
-  let targetW = containerWidth;
-  let targetH = containerHeight;
-  let targetXOffset = 0;
-  let targetYOffset = 0;
-
-  if (!isCover && !isBleedEnabled) {
-    const scaleFactor = containerWidth / activeTrimSize.width;
-    const marginGutter = 0.375 * scaleFactor;
-    const marginOutside = 0.25 * scaleFactor;
-    const marginTop = 0.25 * (containerHeight / activeTrimSize.height);
-    const marginBottom = 0.25 * (containerHeight / activeTrimSize.height);
-
-    targetW = containerWidth - (marginGutter + marginOutside);
-    targetH = containerHeight - (marginTop + marginBottom);
-
-    const marginLeft = isOdd ? marginGutter : marginOutside;
-    targetXOffset = marginLeft - (containerWidth - targetW) / 2;
-    targetYOffset = marginBottom - (containerHeight - targetH) / 2;
-  }
-
-  const containerRatio = targetW / targetH;
-  
+  // Strictly calculate aspect-ratio contain dimensions based on canvas container
+  const containerRatio = containerWidth / containerHeight;
   let imgWidth, imgHeight;
   if (aspectRatio > containerRatio) {
-    imgWidth = targetW;
-    imgHeight = targetW / aspectRatio;
+    imgWidth = containerWidth;
+    imgHeight = containerWidth / aspectRatio;
   } else {
-    imgHeight = targetH;
-    imgWidth = targetH * aspectRatio;
+    imgHeight = containerHeight;
+    imgWidth = containerHeight * aspectRatio;
   }
 
   const style = {
@@ -205,7 +157,7 @@ const PreviewImage = ({
     height: `${imgHeight}px`,
     marginLeft: `${-imgWidth / 2}px`,
     marginTop: `${-imgHeight / 2}px`,
-    transform: `translate(${targetXOffset + (xOffset / 2)}px, ${targetYOffset + (yOffset / 2)}px) scale(${xScale}, ${yScale})`,
+    transform: `translate(${xOffset / 2}px, ${yOffset / 2}px) scale(${xScale}, ${yScale})`,
     transformOrigin: 'center center',
     maxWidth: 'none',
     maxHeight: 'none',
@@ -229,9 +181,6 @@ const PreviewImage = ({
           yOffset={yOffset}
           containerWidth={containerWidth}
           containerHeight={containerHeight}
-          isBleedEnabled={isBleedEnabled}
-          isCover={isCover}
-          isOdd={isOdd}
           aspectRatio={aspectRatio}
           onResizeStart={onResizeStart}
         />
@@ -433,29 +382,39 @@ export default function BookPreview() {
   const currentXOffset = (activeTransform.xOffset || 0) * pointsToUnits;
   const currentYOffset = (activeTransform.yOffset || 0) * pointsToUnits;
 
-  // Real-time aspect-ratio fit pxPerInch math
-  const totalCoverWidthInches = coverType === 'full' 
-    ? baseW 
-    : ((activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * 2 + spineWidth);
-  const coverHeightInches = bindingType === 'hardcover' 
-    ? activeTrimSize.height + (0.591 * 2) 
-    : activeTrimSize.height + 0.25;
+  // Real-time aspect-ratio fit pxPerInch math (Strictly derived from KDP Sidebar parameters)
+  const coverDims = calculateCoverDimensions(
+    activeTrimSize.width,
+    activeTrimSize.height,
+    spineWidth,
+    hasBleed,
+    bindingType
+  );
+  const totalCoverWidthInches = coverDims.width;
+  const coverHeightInches = coverDims.height;
 
   const pxPerInchCover = (workspaceWidth / totalCoverWidthInches) * zoom;
-  const coverPagePxWidth = Math.round((activeTrimSize.width + (bindingType === 'hardcover' ? (0.591 + 0.394) : 0.125)) * pxPerInchCover);
+  const coverCanvasPxWidth = Math.round(totalCoverWidthInches * pxPerInchCover);
+  const coverCanvasPxHeight = Math.round(coverHeightInches * pxPerInchCover);
   const spinePxWidth = Math.max(16, Math.round(spineWidth * pxPerInchCover));
-  const coverPreviewHeight = coverHeightInches * pxPerInchCover;
+  const coverPagePxWidth = Math.round(((totalCoverWidthInches - spineWidth) / 2) * pxPerInchCover);
 
-  const interiorWidthInches = activeTrimSize.width + (hasBleed ? 0.125 : 0);
-  const interiorHeightInches = activeTrimSize.height + (hasBleed ? 0.25 : 0);
+  const interiorDims = calculateInteriorDimensions(
+    activeTrimSize.width,
+    activeTrimSize.height,
+    hasBleed
+  );
+  const interiorWidthInches = interiorDims.width;
+  const interiorHeightInches = interiorDims.height;
   const totalInteriorWidthInches = interiorWidthInches * 2;
 
   const pxPerInchInterior = (workspaceWidth / totalInteriorWidthInches) * zoom;
   const interiorPagePxWidth = Math.round(interiorWidthInches * pxPerInchInterior);
-  const interiorPreviewHeight = interiorHeightInches * pxPerInchInterior;
+  const interiorPreviewHeight = Math.round(interiorHeightInches * pxPerInchInterior);
+  const interiorSpreadPxWidth = interiorPagePxWidth * 2;
 
   // Active preview dimensions depending on tab
-  const previewHeight = activeTab === 'cover' ? coverPreviewHeight : interiorPreviewHeight;
+  const previewHeight = activeTab === 'cover' ? coverCanvasPxHeight : interiorPreviewHeight;
   const previewWidth = activeTab === 'cover' ? coverPagePxWidth : interiorPagePxWidth;
   const pxPerInch = activeTab === 'cover' ? pxPerInchCover : pxPerInchInterior;
 
@@ -647,37 +606,12 @@ export default function BookPreview() {
       }
     }
 
-    const containerElement = e.target.closest('.relative.flex.overflow-hidden, .relative.h-full.w-full, .bg-white.relative, .relative.flex-1');
+    const containerElement = e.target.closest('.cursor-pointer, .overflow-hidden') || e.target.parentElement;
     if (!containerElement) return;
 
     const rect = containerElement.getBoundingClientRect();
-
-    let targetW = rect.width;
-    let targetH = rect.height;
-    let targetXOffset = 0;
-    let targetYOffset = 0;
-
-    const isCover = elementKey !== null;
-    const isBleedEnabled = isCover ? true : hasBleed;
-
-    if (!isCover && !isBleedEnabled) {
-      const scaleFactor = rect.width / activeTrimSize.width;
-      const marginGutter = 0.375 * scaleFactor;
-      const marginOutside = 0.25 * scaleFactor;
-      const marginTop = 0.25 * (rect.height / activeTrimSize.height);
-      const marginBottom = 0.25 * (rect.height / activeTrimSize.height);
-
-      targetW = rect.width - (marginGutter + marginOutside);
-      targetH = rect.height - (marginTop + marginBottom);
-
-      const isOdd = pageId ? (interiorPages.findIndex(p => p.id === pageId) % 2 !== 0) : false;
-      const marginLeft = isOdd ? marginGutter : marginOutside;
-      targetXOffset = marginLeft - (rect.width - targetW) / 2;
-      targetYOffset = marginBottom - (rect.height - targetH) / 2;
-    }
-
-    const cx = rect.width / 2 + targetXOffset + (currentXOffset / 2);
-    const cy = rect.height / 2 + targetYOffset + (currentYOffset / 2);
+    const cx = rect.width / 2 + (currentXOffset / 2);
+    const cy = rect.height / 2 + (currentYOffset / 2);
     const centerX = rect.left + cx;
     const centerY = rect.top + cy;
 
@@ -868,20 +802,21 @@ export default function BookPreview() {
               coverType === 'full' ? (
                 /* Full Cover layout */
                 <div
-                  className="relative flex border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-xl overflow-hidden shadow-lg transition-all max-w-full"
+                  className="relative border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl overflow-hidden shadow-lg transition-all max-w-full"
                   style={{
-                    height: `${coverPreviewHeight}px`,
-                    width: `${coverPagePxWidth * 2 + spinePxWidth}px`
+                    height: `${coverCanvasPxHeight}px`,
+                    width: `${coverCanvasPxWidth}px`
                   }}
                   ref={canvasRef}
                 >
+                  {/* Layer 1: Image Layer (Underneath guides) */}
                   <div
                     onMouseDown={(e) => {
                       setSelectedElement('full');
                       if (fullCover) handleDragStart(e, 'full');
                     }}
-                    className={`relative flex-1 h-full cursor-pointer overflow-hidden transition-all ${
-                      selectedElement === 'full' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
+                    className={`absolute inset-0 cursor-pointer overflow-hidden transition-all ${
+                      selectedElement === 'full' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/40'
                     }`}
                   >
                     {fullCover ? (
@@ -891,11 +826,9 @@ export default function BookPreview() {
                         yScale={fullCover.yScale}
                         xOffset={fullCover.xOffset}
                         yOffset={fullCover.yOffset}
-                        containerWidth={coverPagePxWidth * 2 + spinePxWidth}
-                        containerHeight={coverPreviewHeight}
+                        containerWidth={coverCanvasPxWidth}
+                        containerHeight={coverCanvasPxHeight}
                         isDragging={dragState.isDragging && selectedElement === 'full'}
-                        isBleedEnabled={true}
-                        isCover={true}
                         isSelected={selectedElement === 'full'}
                         onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'full')}
                       />
@@ -905,36 +838,59 @@ export default function BookPreview() {
                         <span className="text-[10px] font-bold uppercase">Загрузите полный разворот обложки</span>
                       </div>
                     )}
+                  </div>
 
-                    {/* Spine boundary guides inside full cover */}
-                    <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 border-l border-r border-dashed border-indigo-500/30 bg-indigo-50/5 pointer-events-none" style={{ width: `${spinePxWidth}px` }} />
+                  {/* Layer 2: Guides Layer (Fixed to Canvas, pointer-events-none, never scales with image) */}
+                  <div className="absolute inset-0 pointer-events-none z-20">
+                    {/* Spine boundary guides */}
+                    <div
+                      className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 border-l border-r border-dashed border-indigo-500/40 bg-indigo-50/5"
+                      style={{ width: `${spinePxWidth}px` }}
+                    />
 
                     {/* Hardcover channels and wrap zones */}
-                    {bindingType === 'hardcover' && (
+                    {bindingType === 'hardcover' ? (
                       <>
-                        {/* Wrap areas */}
-                        <div className="absolute top-0 left-0 right-0 bg-slate-900/10 border-b border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute bottom-0 left-0 right-0 bg-slate-900/10 border-t border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 left-0 bg-slate-900/10 border-r border-dashed border-red-500/40 pointer-events-none z-10" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 right-0 bg-slate-900/10 border-l border-dashed border-red-500/40 pointer-events-none z-10" style={{ width: `${0.591 * pxPerInchCover}px` }} />
+                        {/* Wrap areas (0.591" = 15mm from all 4 outer edges) */}
+                        <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                        <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                        <div className="absolute top-0 bottom-0 left-0 bg-red-500/5 border-r border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
+                        <div className="absolute top-0 bottom-0 right-0 bg-red-500/5 border-l border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
 
-                        {/* Hinge channels */}
-                        <div className="absolute top-0 bottom-0 bg-slate-900/10 border-l border-r border-dashed border-blue-500/40 pointer-events-none z-10" style={{
+                        {/* Hinge channels (0.394" = 10mm flanking spine) */}
+                        <div className="absolute top-0 bottom-0 bg-blue-500/5 border-l border-r border-dashed border-blue-500/50" style={{
                           left: `${(0.591 + activeTrimSize.width) * pxPerInchCover}px`,
                           width: `${0.394 * pxPerInchCover}px`
                         }} />
-                        <div className="absolute top-0 bottom-0 bg-slate-900/10 border-l border-r border-dashed border-blue-500/40 pointer-events-none z-10" style={{
+                        <div className="absolute top-0 bottom-0 bg-blue-500/5 border-l border-r border-dashed border-blue-500/50" style={{
                           left: `${(0.591 + activeTrimSize.width + 0.394 + spineWidth) * pxPerInchCover}px`,
                           width: `${0.394 * pxPerInchCover}px`
                         }} />
                       </>
-                    )}
-
-                    {/* Standard safety and bleed labels */}
-                    {bindingType !== 'hardcover' && (
+                    ) : (
                       <>
-                        <div className="absolute inset-1 border border-red-500/25 border-dashed pointer-events-none" />
-                        <div className="absolute inset-3 border border-indigo-500/15 pointer-events-none" />
+                        {/* Paperback Bleed / Trim lines (0.125" from canvas edge) */}
+                        {hasBleed && (
+                          <div
+                            className="absolute border border-dashed border-red-500/50"
+                            style={{
+                              top: `${0.125 * pxPerInchCover}px`,
+                              bottom: `${0.125 * pxPerInchCover}px`,
+                              left: `${0.125 * pxPerInchCover}px`,
+                              right: `${0.125 * pxPerInchCover}px`
+                            }}
+                          />
+                        )}
+                        {/* Safe Margins (0.25" inside trim) */}
+                        <div
+                          className="absolute border border-dashed border-indigo-500/30"
+                          style={{
+                            top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`
+                          }}
+                        />
                       </>
                     )}
 
@@ -944,8 +900,11 @@ export default function BookPreview() {
               ) : (
                 /* Parts Layout: Back, Spine, Front Cover */
                 <div 
-                  className="relative flex border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-xl overflow-hidden shadow-lg transition-all max-w-full"
-                  style={{ height: `${coverPreviewHeight}px` }}
+                  className="relative flex border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl overflow-hidden shadow-lg transition-all max-w-full"
+                  style={{ 
+                    width: `${coverCanvasPxWidth}px`,
+                    height: `${coverCanvasPxHeight}px` 
+                  }}
                   ref={canvasRef}
                 >
                   {/* Back Cover Block */}
@@ -954,11 +913,12 @@ export default function BookPreview() {
                       setSelectedElement('back');
                       if (backCover) handleDragStart(e, 'back');
                     }}
-                    className={`relative flex items-center justify-center border-r border-dashed border-slate-350 dark:border-slate-800 cursor-pointer overflow-hidden transition-all ${
+                    className={`relative h-full flex items-center justify-center border-r border-dashed border-slate-350 dark:border-slate-800 cursor-pointer overflow-hidden transition-all ${
                       selectedElement === 'back' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
                     }`}
                     style={{ width: `${coverPagePxWidth}px` }}
                   >
+                    {/* Image Layer */}
                     {backCover ? (
                       <PreviewImage
                         src={backCover.preview}
@@ -967,10 +927,8 @@ export default function BookPreview() {
                         xOffset={backCover.xOffset}
                         yOffset={backCover.yOffset}
                         containerWidth={coverPagePxWidth}
-                        containerHeight={coverPreviewHeight}
+                        containerHeight={coverCanvasPxHeight}
                         isDragging={dragState.isDragging && selectedElement === 'back'}
-                        isBleedEnabled={true}
-                        isCover={true}
                         isSelected={selectedElement === 'back'}
                         onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'back')}
                       />
@@ -978,28 +936,41 @@ export default function BookPreview() {
                       <span className="text-[10px] font-bold text-slate-400 uppercase">Задняя часть</span>
                     )}
 
-                    {/* Hardcover Guidelines */}
-                    {bindingType === 'hardcover' ? (
-                      <>
-                        <div className="absolute top-0 left-0 right-0 bg-slate-900/10 border-b border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute bottom-0 left-0 right-0 bg-slate-900/10 border-t border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 left-0 bg-slate-900/10 border-r border-dashed border-red-500/40 pointer-events-none z-10" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 right-0 bg-slate-900/10 border-l border-dashed border-blue-500/40 pointer-events-none z-10" style={{ width: `${0.394 * pxPerInchCover}px` }} />
-                        
-                        <div className="absolute border border-indigo-500/30 pointer-events-none z-10" style={{
-                          top: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                          bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                          left: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                          right: `${(0.394 + 0.375) * pxPerInchCover}px`
-                        }} />
-                      </>
-                    ) : (
-                      <>
-                        <div className="absolute inset-1 border border-red-500/30 border-dashed pointer-events-none" />
-                        <div className="absolute inset-3 border border-indigo-500/20 pointer-events-none" />
-                      </>
-                    )}
-                    {renderSmartGuides('back')}
+                    {/* Guides Layer for Back Cover (Fixed to Back Container) */}
+                    <div className="absolute inset-0 pointer-events-none z-20">
+                      {bindingType === 'hardcover' ? (
+                        <>
+                          <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute top-0 bottom-0 left-0 bg-red-500/5 border-r border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute top-0 bottom-0 right-0 bg-blue-500/5 border-l border-dashed border-blue-500/50" style={{ width: `${0.394 * pxPerInchCover}px` }} />
+                          <div className="absolute border border-dashed border-indigo-500/30" style={{
+                            top: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                            bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                            left: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                            right: `${(0.394 + 0.375) * pxPerInchCover}px`
+                          }} />
+                        </>
+                      ) : (
+                        <>
+                          {hasBleed && (
+                            <div className="absolute border-t border-b border-l border-dashed border-red-500/50" style={{
+                              top: `${0.125 * pxPerInchCover}px`,
+                              bottom: `${0.125 * pxPerInchCover}px`,
+                              left: `${0.125 * pxPerInchCover}px`,
+                              right: 0
+                            }} />
+                          )}
+                          <div className="absolute border border-dashed border-indigo-500/30" style={{
+                            top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            right: `${0.25 * pxPerInchCover}px`
+                          }} />
+                        </>
+                      )}
+                      {renderSmartGuides('back')}
+                    </div>
                   </div>
 
                   {/* Dynamic Spine Block */}
@@ -1008,7 +979,7 @@ export default function BookPreview() {
                       setSelectedElement('spine');
                       if (spineImage && pageCount >= 79) handleDragStart(e, 'spine');
                     }}
-                    className={`relative flex items-center justify-center overflow-hidden cursor-pointer ${
+                    className={`relative h-full flex items-center justify-center overflow-hidden cursor-pointer ${
                       selectedElement === 'spine' ? 'ring-2 ring-indigo-500 ring-inset' : ''
                     }`}
                     style={{
@@ -1016,6 +987,7 @@ export default function BookPreview() {
                       width: `${spinePxWidth}px`
                     }}
                   >
+                    {/* Image / Text Layer */}
                     {spineImage && pageCount >= 79 ? (
                       <PreviewImage
                         src={spineImage.preview}
@@ -1024,10 +996,8 @@ export default function BookPreview() {
                         xOffset={spineImage.xOffset}
                         yOffset={spineImage.yOffset}
                         containerWidth={spinePxWidth}
-                        containerHeight={coverPreviewHeight}
+                        containerHeight={coverCanvasPxHeight}
                         isDragging={dragState.isDragging && selectedElement === 'spine'}
-                        isBleedEnabled={true}
-                        isCover={true}
                         isSelected={selectedElement === 'spine'}
                         onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'spine')}
                       />
@@ -1044,25 +1014,28 @@ export default function BookPreview() {
                       </span>
                     ) : null}
 
-                    {bindingType === 'hardcover' ? (
-                      <>
-                        <div className="absolute top-0 left-0 right-0 bg-slate-900/10 border-b border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute bottom-0 left-0 right-0 bg-slate-900/10 border-t border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                      </>
-                    ) : (
-                      selectedElement === 'spine' && (
-                        <div
-                          className="absolute border border-dashed border-red-500/60 pointer-events-none z-10"
-                          style={{
-                            left: `${0.0625 * pxPerInchCover}px`,
-                            right: `${0.0625 * pxPerInchCover}px`,
-                            top: `${0.25 * pxPerInchCover}px`,
-                            bottom: `${0.25 * pxPerInchCover}px`
-                          }}
-                        />
-                      )
-                    )}
-                    {renderSmartGuides('spine')}
+                    {/* Guides Layer for Spine */}
+                    <div className="absolute inset-0 pointer-events-none z-20">
+                      {bindingType === 'hardcover' ? (
+                        <>
+                          <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                        </>
+                      ) : (
+                        selectedElement === 'spine' && (
+                          <div
+                            className="absolute border border-dashed border-red-500/60"
+                            style={{
+                              left: `${0.0625 * pxPerInchCover}px`,
+                              right: `${0.0625 * pxPerInchCover}px`,
+                              top: `${0.25 * pxPerInchCover}px`,
+                              bottom: `${0.25 * pxPerInchCover}px`
+                            }}
+                          />
+                        )
+                      )}
+                      {renderSmartGuides('spine')}
+                    </div>
                   </div>
 
                   {/* Front Cover Block */}
@@ -1071,11 +1044,12 @@ export default function BookPreview() {
                       setSelectedElement('front');
                       if (frontCover) handleDragStart(e, 'front');
                     }}
-                    className={`relative flex items-center justify-center cursor-pointer overflow-hidden transition-all ${
+                    className={`relative h-full flex items-center justify-center cursor-pointer overflow-hidden transition-all ${
                       selectedElement === 'front' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
                     }`}
                     style={{ width: `${coverPagePxWidth}px` }}
                   >
+                    {/* Image Layer */}
                     {frontCover ? (
                       <PreviewImage
                         src={frontCover.preview}
@@ -1084,10 +1058,8 @@ export default function BookPreview() {
                         xOffset={frontCover.xOffset}
                         yOffset={frontCover.yOffset}
                         containerWidth={coverPagePxWidth}
-                        containerHeight={coverPreviewHeight}
+                        containerHeight={coverCanvasPxHeight}
                         isDragging={dragState.isDragging && selectedElement === 'front'}
-                        isBleedEnabled={true}
-                        isCover={true}
                         isSelected={selectedElement === 'front'}
                         onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'front')}
                       />
@@ -1095,28 +1067,41 @@ export default function BookPreview() {
                       <span className="text-[10px] font-bold text-slate-400 uppercase">Передняя часть</span>
                     )}
 
-                    {/* Hardcover Guidelines */}
-                    {bindingType === 'hardcover' ? (
-                      <>
-                        <div className="absolute top-0 left-0 right-0 bg-slate-900/10 border-b border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute bottom-0 left-0 right-0 bg-slate-900/10 border-t border-dashed border-red-500/40 pointer-events-none z-10" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 right-0 bg-slate-900/10 border-l border-dashed border-red-500/40 pointer-events-none z-10" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 left-0 bg-slate-900/10 border-r border-dashed border-blue-500/40 pointer-events-none z-10" style={{ width: `${0.394 * pxPerInchCover}px` }} />
-                        
-                        <div className="absolute border border-indigo-500/30 pointer-events-none z-10" style={{
-                          top: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                          bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                          right: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                          left: `${(0.394 + 0.375) * pxPerInchCover}px`
-                        }} />
-                      </>
-                    ) : (
-                      <>
-                        <div className="absolute inset-1 border border-red-500/30 border-dashed pointer-events-none" />
-                        <div className="absolute inset-3 border border-indigo-500/20 pointer-events-none" />
-                      </>
-                    )}
-                    {renderSmartGuides('front')}
+                    {/* Guides Layer for Front Cover */}
+                    <div className="absolute inset-0 pointer-events-none z-20">
+                      {bindingType === 'hardcover' ? (
+                        <>
+                          <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute top-0 bottom-0 right-0 bg-red-500/5 border-l border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
+                          <div className="absolute top-0 bottom-0 left-0 bg-blue-500/5 border-r border-dashed border-blue-500/50" style={{ width: `${0.394 * pxPerInchCover}px` }} />
+                          <div className="absolute border border-dashed border-indigo-500/30" style={{
+                            top: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                            bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                            right: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                            left: `${(0.394 + 0.375) * pxPerInchCover}px`
+                          }} />
+                        </>
+                      ) : (
+                        <>
+                          {hasBleed && (
+                            <div className="absolute border-t border-b border-r border-dashed border-red-500/50" style={{
+                              top: `${0.125 * pxPerInchCover}px`,
+                              bottom: `${0.125 * pxPerInchCover}px`,
+                              right: `${0.125 * pxPerInchCover}px`,
+                              left: 0
+                            }} />
+                          )}
+                          <div className="absolute border border-dashed border-indigo-500/30" style={{
+                            top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                            left: `${0.25 * pxPerInchCover}px`
+                          }} />
+                        </>
+                      )}
+                      {renderSmartGuides('front')}
+                    </div>
                   </div>
                 </div>
               )
@@ -1134,8 +1119,13 @@ export default function BookPreview() {
                     return (
                       <div className="flex flex-col items-center gap-4">
                         {/* 2D Spread Side-by-Side Pages */}
-                        <div className="flex border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 rounded-xl overflow-hidden shadow-lg">
-                          
+                        <div 
+                          className="relative flex border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl overflow-hidden shadow-lg"
+                          style={{
+                            width: `${interiorSpreadPxWidth}px`,
+                            height: `${interiorPreviewHeight}px`
+                          }}
+                        >
                           {/* Left page container */}
                           <div
                             onClick={() => leftPage && setSelectedPageId(leftPage.id)}
@@ -1145,14 +1135,14 @@ export default function BookPreview() {
                                 handleDragStart(e, null, leftPage.id);
                               }
                             }}
-                            className={`relative border-r border-dashed border-slate-300 dark:border-slate-800 overflow-hidden cursor-pointer flex items-center justify-center transition-all ${
+                            className={`relative h-full border-r border-dashed border-slate-300 dark:border-slate-800 overflow-hidden cursor-pointer flex items-center justify-center transition-all ${
                               leftPage && selectedPageId === leftPage.id ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
                             }`}
                             style={{
-                              width: `${interiorPagePxWidth}px`,
-                              height: `${interiorPreviewHeight}px`
+                              width: `${interiorPagePxWidth}px`
                             }}
                           >
+                            {/* Image Layer */}
                             {leftPage ? (
                               leftPage.isBlank ? (
                                 <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400 bg-slate-100/40">
@@ -1169,18 +1159,37 @@ export default function BookPreview() {
                                   containerWidth={interiorPagePxWidth}
                                   containerHeight={interiorPreviewHeight}
                                   isDragging={dragState.isDragging && selectedPageId === leftPage.id}
-                                  isBleedEnabled={hasBleed}
-                                  isCover={false}
-                                  isOdd={false}
                                   isSelected={selectedPageId === leftPage.id}
                                   onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, null, leftPage.id)}
                                 />
                               )
                             ) : null}
                             
-                            <div className="absolute inset-1 border border-red-500/20 border-dashed pointer-events-none" />
-                            <div className="absolute inset-3 border border-indigo-500/10 pointer-events-none" />
-                            {leftPage && !leftPage.isBlank && renderSmartGuides(null, leftPage.id)}
+                            {/* Guides Layer for Left Page (Fixed to Left Page Canvas) */}
+                            <div className="absolute inset-0 pointer-events-none z-20">
+                              {hasBleed && (
+                                <div
+                                  className="absolute border-t border-b border-l border-dashed border-red-500/50"
+                                  style={{
+                                    top: `${0.125 * pxPerInchInterior}px`,
+                                    bottom: `${0.125 * pxPerInchInterior}px`,
+                                    left: `${0.125 * pxPerInchInterior}px`,
+                                    right: 0
+                                  }}
+                                />
+                              )}
+                              {/* Safe Margins & Gutter (Left page: Gutter on Right / Spine edge) */}
+                              <div
+                                className="absolute border border-dashed border-indigo-500/30"
+                                style={{
+                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                  left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                  right: `${0.375 * pxPerInchInterior}px`
+                                }}
+                              />
+                              {leftPage && !leftPage.isBlank && renderSmartGuides(null, leftPage.id)}
+                            </div>
                           </div>
 
                           {/* Right page container */}
@@ -1192,14 +1201,14 @@ export default function BookPreview() {
                                 handleDragStart(e, null, rightPage.id);
                               }
                             }}
-                            className={`relative overflow-hidden cursor-pointer flex items-center justify-center transition-all ${
+                            className={`relative h-full overflow-hidden cursor-pointer flex items-center justify-center transition-all ${
                               rightPage && selectedPageId === rightPage.id ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
                             }`}
                             style={{
-                              width: `${interiorPagePxWidth}px`,
-                              height: `${interiorPreviewHeight}px`
+                              width: `${interiorPagePxWidth}px`
                             }}
                           >
+                            {/* Image Layer */}
                             {rightPage ? (
                               rightPage.isBlank ? (
                                 <div className="flex flex-col items-center justify-center h-full p-8 text-center text-slate-400 bg-slate-100/40">
@@ -1216,18 +1225,36 @@ export default function BookPreview() {
                                   containerWidth={interiorPagePxWidth}
                                   containerHeight={interiorPreviewHeight}
                                   isDragging={dragState.isDragging && selectedPageId === rightPage.id}
-                                  isBleedEnabled={hasBleed}
-                                  isCover={false}
-                                  isOdd={true}
                                   isSelected={selectedPageId === rightPage.id}
                                   onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, null, rightPage.id)}
                                 />
                               )
                             ) : null}
                             
-                            <div className="absolute inset-1 border border-red-500/20 border-dashed pointer-events-none" />
-                            <div className="absolute inset-3 border border-indigo-500/10 pointer-events-none" />
-                            {rightPage && !rightPage.isBlank && renderSmartGuides(null, rightPage.id)}
+                            {/* Guides Layer for Right Page (Gutter on Left / Spine edge) */}
+                            <div className="absolute inset-0 pointer-events-none z-20">
+                              {hasBleed && (
+                                <div
+                                  className="absolute border-t border-b border-r border-dashed border-red-500/50"
+                                  style={{
+                                    top: `${0.125 * pxPerInchInterior}px`,
+                                    bottom: `${0.125 * pxPerInchInterior}px`,
+                                    right: `${0.125 * pxPerInchInterior}px`,
+                                    left: 0
+                                  }}
+                                />
+                              )}
+                              <div
+                                className="absolute border border-dashed border-indigo-500/30"
+                                style={{
+                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                  right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                  left: `${0.375 * pxPerInchInterior}px`
+                                }}
+                              />
+                              {rightPage && !rightPage.isBlank && renderSmartGuides(null, rightPage.id)}
+                            </div>
                           </div>
 
                         </div>
