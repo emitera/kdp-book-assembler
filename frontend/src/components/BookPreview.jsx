@@ -161,7 +161,7 @@ const PreviewImage = ({
         src={src}
         onLoad={handleImageLoad}
         alt="Loading..."
-        className="w-full h-full object-cover pointer-events-none opacity-0"
+        className="w-full h-full object-contain pointer-events-none opacity-0"
       />
     );
   }
@@ -1322,7 +1322,7 @@ export default function BookPreview() {
                             maxWidth: 'none',
                             maxHeight: 'none',
                             pointerEvents: 'none',
-                            objectFit: 'fill',
+                            objectFit: 'contain',
                             transform: `scale(${xScale}, ${yScale})`,
                             transformOrigin: `${backCoverPxWidth + spinePx + (backCoverPxWidth / 2)}px center`
                           }}
@@ -1432,7 +1432,7 @@ export default function BookPreview() {
                             maxWidth: 'none',
                             maxHeight: 'none',
                             pointerEvents: 'none',
-                            objectFit: 'fill',
+                            objectFit: 'contain',
                             transform: `scale(${xScale}, ${yScale})`,
                             transformOrigin: `${backCoverPxWidth / 2}px center`
                           }}

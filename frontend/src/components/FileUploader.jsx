@@ -585,7 +585,7 @@ export default function FileUploader() {
                   <img
                     src={page.preview}
                     alt={`Page ${index + 1}`}
-                    className="w-7 h-7 object-cover rounded border border-slate-200 dark:border-slate-700 bg-slate-50"
+                    className="w-7 h-7 object-contain rounded border border-slate-200 dark:border-slate-700 bg-slate-50"
                   />
                   <div className="min-w-0">
                     <p className="font-semibold text-slate-800 dark:text-slate-200 truncate max-w-xs md:max-w-md">

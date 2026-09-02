@@ -1,6 +1,6 @@
 /**
  * Image Validator & Auto-Resize Canvas Engine
- * Validates image resolution against 300 DPI KDP specifications and provides object-fit: cover auto-resizing.
+ * Validates image resolution against 300 DPI KDP specifications and provides zero-crop contain auto-resizing.
  */
 
 /**
@@ -64,7 +64,8 @@ export function calculateRequiredDimensions(trimWidth, trimHeight, hasBleed, isC
 }
 
 /**
- * Resizes an image file onto a 300 DPI canvas using object-fit: cover logic and white background
+ * Resizes an image file onto a 300 DPI canvas using object-fit: contain logic (Maintain Aspect Ratio) and white background.
+ * Zero-Crop Policy: The entire image is fully preserved without any cropping.
  */
 export function resizeImageToFit(file, targetWidthPx, targetHeightPx) {
   return new Promise((resolve, reject) => {
@@ -83,14 +84,15 @@ export function resizeImageToFit(file, targetWidthPx, targetHeightPx) {
       ctx.fillStyle = '#FFFFFF';
       ctx.fillRect(0, 0, targetWidthPx, targetHeightPx);
 
-      // 2. Compute object-fit: cover scale and center offsets (fills entire canvas, crops excess)
-      const scale = Math.max(targetWidthPx / img.naturalWidth, targetHeightPx / img.naturalHeight);
+      // 2. Compute object-fit: contain scale and center offsets (ZERO CROP, preserves full image)
+      // Always uses Math.min to ensure the entire image fits within canvas bounds
+      const scale = Math.min(targetWidthPx / img.naturalWidth, targetHeightPx / img.naturalHeight);
       const drawWidth = img.naturalWidth * scale;
       const drawHeight = img.naturalHeight * scale;
       const offsetX = (targetWidthPx - drawWidth) / 2;
       const offsetY = (targetHeightPx - drawHeight) / 2;
 
-      // 3. Draw image centered (excess is cropped by canvas bounds)
+      // 3. Draw entire image centered on white canvas (zero-crop)
       ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
 
       // 4. Export to Blob as JPEG (high quality)
