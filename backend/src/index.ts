@@ -12,6 +12,8 @@ type Bindings = {
   PAYPAL_CLIENT_SECRET: string;
   PAYPAL_LIVE_MODE?: string;
   FRONTEND_URL?: string;
+  RESEND_API_KEY?: string;
+  SUPPORT_EMAIL?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -230,7 +232,183 @@ app.get('/api/simulate-payment', async (c) => {
 });
 
 /**
- * Admin API: Fetch all registered users
+ * Helper to send email notification to support@birdypages.io via Resend or HTTP dispatch
+ */
+async function sendSupportEmail(
+  env: Bindings,
+  ticket: { email: string; subject: string; category: string; message: string; userId?: string | null; ticketId?: string }
+) {
+  const supportEmail = env.SUPPORT_EMAIL || 'support@birdypages.io';
+  const apiKey = env.RESEND_API_KEY;
+
+  if (apiKey) {
+    try {
+      const emailHtml = `
+        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+          <div style="border-bottom: 2px solid #6366f1; padding-bottom: 12px; margin-bottom: 16px;">
+            <h2 style="color: #4f46e5; margin: 0; font-size: 20px;">Birdy Pages Support Request</h2>
+            <span style="font-size: 12px; color: #64748b;">Ticket ID: ${ticket.ticketId || 'N/A'}</span>
+          </div>
+          <table style="width: 100%; font-size: 14px; margin-bottom: 20px; border-collapse: collapse;">
+            <tr>
+              <td style="font-weight: bold; width: 130px; color: #475569; padding: 6px 0;">From Email:</td>
+              <td style="padding: 6px 0;"><a href="mailto:${ticket.email}" style="color: #4f46e5; font-weight: 600;">${ticket.email}</a></td>
+            </tr>
+            <tr>
+              <td style="font-weight: bold; color: #475569; padding: 6px 0;">User ID:</td>
+              <td style="padding: 6px 0;">${ticket.userId || 'Guest (Not authenticated)'}</td>
+            </tr>
+            <tr>
+              <td style="font-weight: bold; color: #475569; padding: 6px 0;">Category:</td>
+              <td style="padding: 6px 0;"><span style="background: #eef2ff; color: #4338ca; padding: 3px 8px; border-radius: 6px; font-weight: 600; font-size: 12px;">${ticket.category.toUpperCase()}</span></td>
+            </tr>
+            <tr>
+              <td style="font-weight: bold; color: #475569; padding: 6px 0;">Subject:</td>
+              <td style="padding: 6px 0; font-weight: 600;">${ticket.subject}</td>
+            </tr>
+          </table>
+          <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; border-radius: 8px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; color: #334155;">${ticket.message}</div>
+          <div style="margin-top: 24px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 12px;">
+            Birdy Pages Automated Support Notification • ${new Date().toUTCString()}
+          </div>
+        </div>
+      `;
+
+      const response = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${apiKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          from: 'Birdy Pages Support <onboarding@resend.dev>',
+          to: [supportEmail],
+          reply_to: ticket.email,
+          subject: `[Support - ${ticket.category.toUpperCase()}] ${ticket.subject}`,
+          html: emailHtml
+        })
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.warn('Resend API dispatch notice:', response.status, errorText);
+      }
+    } catch (e) {
+      console.error('Resend dispatch error:', e);
+    }
+  } else {
+    console.log(`[Support Ticket Received] To: ${supportEmail} | From: ${ticket.email} | Subject: ${ticket.subject} | Body: ${ticket.message}`);
+  }
+}
+
+/**
+ * Public API: Submit Support Ticket and send email to support
+ * POST /api/support/ticket
+ */
+app.post('/api/support/ticket', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { email, subject, category, message, userId } = body;
+
+    if (!email || !subject || !message) {
+      return c.json({ error: 'Email, subject, and message are required' }, 400);
+    }
+
+    const supabase = getSupabaseClient(c.env);
+
+    // 1. Insert into support_tickets table
+    const { data: ticket, error: insertError } = await supabase
+      .from('support_tickets')
+      .insert({
+        user_id: userId || null,
+        email,
+        subject,
+        category: category || 'general',
+        message,
+        status: 'open'
+      })
+      .select()
+      .single();
+
+    if (insertError) {
+      console.warn('Supabase support_tickets insert error:', insertError.message);
+    }
+
+    // 2. Dispatch real email to support@birdypages.io
+    await sendSupportEmail(c.env, {
+      email,
+      subject,
+      category: category || 'general',
+      message,
+      userId,
+      ticketId: ticket?.id
+    });
+
+    return c.json({ success: true, ticketId: ticket?.id });
+  } catch (err: any) {
+    console.error('Support ticket error:', err);
+    return c.json({ error: err.message || 'Failed to submit support ticket' }, 500);
+  }
+});
+
+/**
+ * Admin API: Get Support Tickets
+ * GET /api/admin/support-tickets
+ */
+app.get('/api/admin/support-tickets', async (c) => {
+  try {
+    const supabase = getSupabaseClient(c.env);
+    const { data: tickets, error } = await supabase
+      .from('support_tickets')
+      .select('*')
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ tickets: tickets || [] });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to fetch support tickets' }, 500);
+  }
+});
+
+/**
+ * Admin API: Update Support Ticket Status
+ * POST /api/admin/update-ticket-status
+ */
+app.post('/api/admin/update-ticket-status', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { ticketId, status, adminNotes } = body;
+
+    if (!ticketId || !status) {
+      return c.json({ error: 'Missing ticketId or status' }, 400);
+    }
+
+    const supabase = getSupabaseClient(c.env);
+    const updatePayload: any = { status, updated_at: new Date().toISOString() };
+    if (adminNotes !== undefined) updatePayload.admin_notes = adminNotes;
+
+    const { data: updated, error } = await supabase
+      .from('support_tickets')
+      .update(updatePayload)
+      .eq('id', ticketId)
+      .select()
+      .single();
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ success: true, ticket: updated });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to update ticket status' }, 500);
+  }
+});
+
+/**
+ * Admin API: Fetch all registered users with generation credits and subscription metadata
  * GET /api/admin/users
  */
 app.get('/api/admin/users', async (c) => {
@@ -240,7 +418,7 @@ app.get('/api/admin/users', async (c) => {
     // Fetch all user profiles from Supabase
     const { data: users, error } = await supabase
       .from('profiles')
-      .select('id, email, subscription_status, role, is_lifetime_free, created_at')
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits, created_at')
       .order('created_at', { ascending: false });
 
     if (error) {
@@ -250,6 +428,127 @@ app.get('/api/admin/users', async (c) => {
     return c.json({ users: users || [] });
   } catch (err: any) {
     return c.json({ error: err.message || 'Failed to fetch users' }, 500);
+  }
+});
+
+/**
+ * Admin API: Update User Generation Credits (Add, Subtract, Set)
+ * POST /api/admin/update-user-credits
+ */
+app.post('/api/admin/update-user-credits', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { userId, credits, delta } = body;
+
+    if (!userId) {
+      return c.json({ error: 'Missing userId' }, 400);
+    }
+
+    const supabase = getSupabaseClient(c.env);
+
+    let finalCredits = credits;
+    if (typeof delta === 'number') {
+      const { data: current } = await supabase
+        .from('profiles')
+        .select('generation_credits')
+        .eq('id', userId)
+        .single();
+      finalCredits = Math.max(0, (current?.generation_credits || 0) + delta);
+    }
+
+    const { data: updatedProfile, error } = await supabase
+      .from('profiles')
+      .update({ generation_credits: Math.max(0, parseInt(String(finalCredits), 10) || 0) })
+      .eq('id', userId)
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
+      .single();
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ success: true, profile: updatedProfile });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to update user credits' }, 500);
+  }
+});
+
+/**
+ * Admin API: Update User Subscription Plan (Free, One-Time, Monthly, Yearly, Canceled)
+ * POST /api/admin/update-user-plan
+ */
+app.post('/api/admin/update-user-plan', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { userId, plan, expiresAt } = body;
+
+    if (!userId || !plan) {
+      return c.json({ error: 'Missing userId or plan' }, 400);
+    }
+
+    const supabase = getSupabaseClient(c.env);
+    const updatePayload: any = {
+      subscription_status: plan
+    };
+    if (expiresAt !== undefined) {
+      updatePayload.subscription_expires_at = expiresAt;
+    }
+
+    const { data: updated, error } = await supabase
+      .from('profiles')
+      .update(updatePayload)
+      .eq('id', userId)
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
+      .single();
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ success: true, profile: updated });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to update user plan' }, 500);
+  }
+});
+
+/**
+ * Admin API: Cancel User Subscription
+ * POST /api/admin/cancel-subscription
+ */
+app.post('/api/admin/cancel-subscription', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { userId } = body;
+
+    if (!userId) {
+      return c.json({ error: 'Missing userId' }, 400);
+    }
+
+    const supabase = getSupabaseClient(c.env);
+
+    // 1. Update status in database to canceled
+    const { data: updated, error } = await supabase
+      .from('profiles')
+      .update({
+        subscription_status: 'canceled',
+        subscription_expires_at: new Date().toISOString()
+      })
+      .eq('id', userId)
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
+      .single();
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    // TODO: Phase 16 Gateway Subscription Cancellation API Call:
+    // When Paddle / Allpay subscription IDs are stored in the user profile,
+    // call Paddle API (DELETE https://api.paddle.com/subscriptions/{subscription_id})
+    // or Allpay recurring cancellation endpoint to cancel recurring charges at the gateway level.
+
+    return c.json({ success: true, profile: updated, message: 'Subscription canceled successfully' });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to cancel subscription' }, 500);
   }
 });
 
@@ -272,7 +571,7 @@ app.post('/api/admin/toggle-lifetime', async (c) => {
       .from('profiles')
       .update({ is_lifetime_free: isLifetimeFree })
       .eq('id', userId)
-      .select('id, email, subscription_status, role, is_lifetime_free')
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
       .single();
 
     if (error) {
@@ -303,7 +602,7 @@ app.post('/api/admin/update-user-role', async (c) => {
       .from('profiles')
       .update({ role })
       .eq('id', userId)
-      .select('id, email, subscription_status, role, is_lifetime_free')
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
       .single();
 
     if (error) {
@@ -334,7 +633,7 @@ app.post('/api/admin/update-user-subscription', async (c) => {
       .from('profiles')
       .update({ subscription_status: subscriptionStatus })
       .eq('id', userId)
-      .select('id, email, subscription_status, role, is_lifetime_free')
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
       .single();
 
     if (error) {
