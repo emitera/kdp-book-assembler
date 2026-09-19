@@ -1,16 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
-import Logo from './Logo';
 import { 
-  ShieldAlert, 
-  ShieldCheck, 
   Users, 
   Search, 
   ArrowLeft, 
   CheckCircle2, 
   XCircle, 
   Loader2, 
-  Gift, 
   RefreshCw,
   DollarSign,
   Save,
@@ -20,17 +16,17 @@ import {
   Mail,
   Lock,
   CreditCard,
-  Globe,
   MessageSquare,
   Plus,
   Minus,
-  AlertTriangle,
-  Clock,
-  Check,
+  AlertCircle,
   Ban,
   Sparkles,
   Key,
-  Copy
+  Copy,
+  Shield,
+  ShieldCheck,
+  Check
 } from 'lucide-react';
 
 const API_URL = import.meta.env.VITE_API_URL || 'https://kdp-backend.emitera.workers.dev';
@@ -39,7 +35,6 @@ export default function AdminPanel() {
   const { 
     user, 
     userProfile, 
-    isAuthLoading, 
     setOneTimePassPriceUsd, 
     setMonthlyProPriceUsd, 
     setYearlySubscriptionPriceUsd,
@@ -53,9 +48,9 @@ export default function AdminPanel() {
   const [usersList, setUsersList] = useState([]);
   const [licensesList, setLicensesList] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [updatingUserId, setUpdatingUserId] = useState(null);
+  const [statusMessage, setStatusMessage] = useState(null);
   const [copiedKey, setCopiedKey] = useState(null);
 
   // Dynamic Pricing Admin State
@@ -77,7 +72,6 @@ export default function AdminPanel() {
 
   // Support Tickets State
   const [supportTickets, setSupportTickets] = useState([]);
-  const [loadingTickets, setLoadingTickets] = useState(false);
   const [updatingTicketId, setUpdatingTicketId] = useState(null);
 
   // Add User Modal State
@@ -91,11 +85,8 @@ export default function AdminPanel() {
   const [creatingUser, setCreatingUser] = useState(false);
   const [createUserError, setCreateUserError] = useState('');
 
-  const isAdmin = user && userProfile?.role === 'admin';
-
   const fetchUsersAndSettings = async () => {
     setLoading(true);
-    setError('');
     try {
       const [usersRes, settingsRes, paymentRes, ticketsRes, licensesRes] = await Promise.all([
         fetch(`${API_URL}/api/admin/users`),
@@ -141,7 +132,6 @@ export default function AdminPanel() {
       }
     } catch (err) {
       console.error('Fetch error:', err);
-      setError('Failed to load admin directory data.');
     } finally {
       setLoading(false);
     }
@@ -151,58 +141,110 @@ export default function AdminPanel() {
     fetchUsersAndSettings();
   }, []);
 
-  // Action: Generate Free Desktop License for User
-  const handleGenerateLicense = async (targetUserId, targetEmail) => {
-    setUpdatingUserId(targetUserId);
+  // Action: Create New User (Auth + Profile)
+  const handleCreateUser = async (e) => {
+    e.preventDefault();
+    setCreatingUser(true);
+    setCreateUserError('');
+
     try {
-      const res = await fetch(`${API_URL}/api/admin/generate-license`, {
+      const res = await fetch(`${API_URL}/api/admin/create-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ user_id: targetUserId, send_email: true })
+        body: JSON.stringify({
+          email: newEmail,
+          password: newPassword,
+          role: newRole,
+          subscriptionStatus: newSubStatus,
+          isLifetimeFree: newIsLifetime,
+          generationCredits: parseInt(newCredits, 10) || 0
+        })
       });
+
       const data = await res.json();
-      if (data.success) {
-        const licRes = await fetch(`${API_URL}/api/admin/licenses`);
-        if (licRes.ok) {
-          const lData = await licRes.json();
-          setLicensesList(lData.licenses || []);
-        }
+      if (!res.ok || data.error) {
+        setCreateUserError(data.error || 'Failed to create user');
       } else {
-        alert(data.error || 'Failed to generate license');
+        setIsAddUserModalOpen(false);
+        setNewEmail('');
+        setNewPassword('');
+        setNewRole('user');
+        setNewSubStatus('free');
+        setNewCredits(0);
+        setNewIsLifetime(false);
+        setStatusMessage({ type: 'success', text: `Пользователь ${newEmail} успешно создан!` });
+        fetchUsersAndSettings();
       }
     } catch (err) {
-      console.error('Error generating license:', err);
-      alert('Network error generating license');
+      setCreateUserError('Network error while creating user');
+    } finally {
+      setCreatingUser(false);
+    }
+  };
+
+  // Action: Update User Role (User / Admin)
+  const handleUpdateRole = async (targetUserId, role) => {
+    setUpdatingUserId(targetUserId);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/update-user-role`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: targetUserId, role })
+      });
+
+      if (res.ok) {
+        setUsersList(usersList.map(u => u.id === targetUserId ? { ...u, role } : u));
+        setStatusMessage({ type: 'success', text: `Роль пользователя изменена на: ${role}` });
+      }
+    } catch (err) {
+      console.error('Failed to update role:', err);
     } finally {
       setUpdatingUserId(null);
     }
   };
 
-  // Action: Revoke License
-  const handleRevokeLicense = async (licenseId, keyString) => {
-    if (!window.confirm(`Вы уверены, что хотите отозвать лицензионный ключ ${keyString}? Десктопное приложение будет заблокировано.`)) {
+  // Action: Delete User
+  const handleDeleteUser = async (targetUserId, targetEmail) => {
+    if (!window.confirm(`Вы уверены, что хотите удалить пользователя ${targetEmail}? Это действие удалит его профиль и авторизацию.`)) {
       return;
     }
+    setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/revoke-license`, {
+      const res = await fetch(`${API_URL}/api/admin/delete-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ license_id: licenseId })
+        body: JSON.stringify({ userId: targetUserId })
       });
-      const data = await res.json();
-      if (data.success) {
-        setLicensesList(licensesList.map(l => l.id === licenseId ? { ...l, status: 'revoked' } : l));
+
+      if (res.ok) {
+        setUsersList(usersList.filter(u => u.id !== targetUserId));
+        setStatusMessage({ type: 'success', text: `Пользователь ${targetEmail} удален.` });
       }
     } catch (err) {
-      console.error('Error revoking license:', err);
+      console.error('Failed to delete user:', err);
+    } finally {
+      setUpdatingUserId(null);
     }
   };
 
-  // Copy Key to Clipboard
-  const handleCopyKey = (keyText) => {
-    navigator.clipboard.writeText(keyText);
-    setCopiedKey(keyText);
-    setTimeout(() => setCopiedKey(null), 2000);
+  // Action: Toggle Lifetime Free Status
+  const handleToggleLifetime = async (targetUserId, currentStatus) => {
+    setUpdatingUserId(targetUserId);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/toggle-lifetime`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: targetUserId, isLifetimeFree: !currentStatus })
+      });
+
+      if (res.ok) {
+        setUsersList(usersList.map(u => u.id === targetUserId ? { ...u, is_lifetime_free: !currentStatus } : u));
+      }
+    } catch (err) {
+      console.error('Failed to toggle lifetime status:', err);
+    } finally {
+      setUpdatingUserId(null);
+    }
   };
 
   // Action: Update User Generation Credits
@@ -246,6 +288,7 @@ export default function AdminPanel() {
         const data = await res.json();
         if (data.profile) {
           setUsersList(usersList.map(u => u.id === targetUserId ? { ...u, subscription_status: data.profile.subscription_status } : u));
+          setStatusMessage({ type: 'success', text: `Тариф пользователя изменен на ${plan}` });
         }
       }
     } catch (err) {
@@ -257,7 +300,7 @@ export default function AdminPanel() {
 
   // Action: Cancel Subscription
   const handleCancelSubscription = async (targetUserId) => {
-    if (!window.confirm('Отменить подписку пользователя? Доступ к платным генерациям будет закрыт.')) {
+    if (!window.confirm('Отменить подписку пользователя? Доступ к платным функциям будет закрыт.')) {
       return;
     }
     setUpdatingUserId(targetUserId);
@@ -272,6 +315,7 @@ export default function AdminPanel() {
         const data = await res.json();
         if (data.profile) {
           setUsersList(usersList.map(u => u.id === targetUserId ? { ...u, subscription_status: 'canceled' } : u));
+          setStatusMessage({ type: 'success', text: 'Подписка пользователя отменена' });
         }
       }
     } catch (err) {
@@ -281,67 +325,59 @@ export default function AdminPanel() {
     }
   };
 
-  // Action: Toggle Lifetime Status
-  const handleToggleLifetime = async (targetUserId, currentStatus) => {
+  // Action: Generate Free Desktop License for User
+  const handleGenerateLicense = async (targetUserId, targetEmail) => {
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/toggle-lifetime`, {
+      const res = await fetch(`${API_URL}/api/admin/generate-license`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: targetUserId, isLifetimeFree: !currentStatus })
+        body: JSON.stringify({ user_id: targetUserId, send_email: true })
       });
-
-      if (res.ok) {
-        setUsersList(usersList.map(u => u.id === targetUserId ? { ...u, is_lifetime_free: !currentStatus } : u));
+      const data = await res.json();
+      if (data.success) {
+        setStatusMessage({ type: 'success', text: `Ключ ${data.license.license_key} успешно выдан для ${targetEmail}!` });
+        const licRes = await fetch(`${API_URL}/api/admin/licenses`);
+        if (licRes.ok) {
+          const lData = await licRes.json();
+          setLicensesList(lData.licenses || []);
+        }
+      } else {
+        setStatusMessage({ type: 'error', text: data.error || 'Ошибка создания лицензии' });
       }
     } catch (err) {
-      console.error('Failed to toggle lifetime status:', err);
+      console.error('Error generating license:', err);
     } finally {
       setUpdatingUserId(null);
     }
   };
 
-  // Action: Update User Role
-  const handleUpdateRole = async (targetUserId, newRole) => {
-    setUpdatingUserId(targetUserId);
-    try {
-      const res = await fetch(`${API_URL}/api/admin/update-user-role`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: targetUserId, role: newRole })
-      });
-
-      if (res.ok) {
-        setUsersList(usersList.map(u => u.id === targetUserId ? { ...u, role: newRole } : u));
-      }
-    } catch (err) {
-      console.error('Failed to update role:', err);
-    } finally {
-      setUpdatingUserId(null);
-    }
-  };
-
-  // Action: Delete User
-  const handleDeleteUser = async (targetUserId, targetEmail) => {
-    if (!window.confirm(`Вы уверены, что хотите удалить пользователя ${targetEmail}? Это действие необратимо.`)) {
+  // Action: Revoke License
+  const handleRevokeLicense = async (licenseId, keyString) => {
+    if (!window.confirm(`Вы уверены, что хотите отозвать лицензионный ключ ${keyString}? Десктопное приложение будет заблокировано.`)) {
       return;
     }
-    setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/delete-user`, {
+      const res = await fetch(`${API_URL}/api/admin/revoke-license`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: targetUserId })
+        body: JSON.stringify({ license_id: licenseId })
       });
-
-      if (res.ok) {
-        setUsersList(usersList.filter(u => u.id !== targetUserId));
+      const data = await res.json();
+      if (data.success) {
+        setLicensesList(licensesList.map(l => l.id === licenseId ? { ...l, status: 'revoked' } : l));
+        setStatusMessage({ type: 'success', text: `Ключ ${keyString} успешно отозван.` });
       }
     } catch (err) {
-      console.error('Failed to delete user:', err);
-    } finally {
-      setUpdatingUserId(null);
+      console.error('Error revoking license:', err);
     }
+  };
+
+  // Copy Key to Clipboard
+  const handleCopyKey = (keyText) => {
+    navigator.clipboard.writeText(keyText);
+    setCopiedKey(keyText);
+    setTimeout(() => setCopiedKey(null), 2000);
   };
 
   // Action: Save App Pricing
@@ -458,12 +494,13 @@ export default function AdminPanel() {
                 <h1 className="text-2xl md:text-3xl font-black tracking-tight bg-gradient-to-r from-indigo-400 to-purple-400 bg-clip-text text-transparent">
                   Birdy Pages Command Center
                 </h1>
-                <span className="bg-indigo-950/80 text-indigo-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-indigo-800/50">
+                <span className="bg-indigo-950/80 text-indigo-400 text-xs font-semibold px-2.5 py-0.5 rounded-full border border-indigo-800/50 flex items-center gap-1">
+                  <ShieldCheck className="w-3.5 h-3.5" />
                   Admin
                 </span>
               </div>
               <p className="text-slate-400 text-sm mt-0.5">
-                CRM пользователей, управление десктопными лицензиями и Paddle MoR
+                CRM пользователей, роли, десктопные лицензии и Paddle MoR
               </p>
             </div>
           </div>
@@ -509,9 +546,25 @@ export default function AdminPanel() {
           </div>
         </div>
 
+        {/* Status Message Notification */}
+        {statusMessage && (
+          <div className={`flex items-center justify-between gap-3 p-4 rounded-xl border ${
+            statusMessage.type === 'success' 
+              ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300' 
+              : 'bg-rose-950/40 border-rose-800 text-rose-300'
+          }`}>
+            <div className="flex items-center gap-2.5">
+              {statusMessage.type === 'success' ? <CheckCircle2 className="w-5 h-5 flex-shrink-0" /> : <AlertCircle className="w-5 h-5 flex-shrink-0" />}
+              <span className="text-sm font-medium">{statusMessage.text}</span>
+            </div>
+            <button onClick={() => setStatusMessage(null)} className="text-xs opacity-70 hover:opacity-100 p-1">✕</button>
+          </div>
+        )}
+
         {/* TAB 1: USERS CRM */}
         {activeTab === 'users' && (
           <div className="space-y-6">
+            {/* Top Toolbar: Search + Add User Button + Refresh */}
             <div className="flex flex-col sm:flex-row gap-4 justify-between items-center bg-slate-900/60 p-4 rounded-2xl border border-slate-800">
               <div className="relative w-full sm:w-96">
                 <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -525,6 +578,15 @@ export default function AdminPanel() {
               </div>
 
               <div className="flex items-center gap-3 w-full sm:w-auto">
+                {/* Add User Button */}
+                <button
+                  onClick={() => setIsAddUserModalOpen(true)}
+                  className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-semibold shadow-lg shadow-indigo-600/30 transition"
+                >
+                  <UserPlus className="w-4 h-4" />
+                  Добавить пользователя
+                </button>
+
                 <button
                   onClick={fetchUsersAndSettings}
                   className="flex items-center gap-2 px-4 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm font-medium text-slate-300 transition"
@@ -542,8 +604,10 @@ export default function AdminPanel() {
                   <thead className="bg-slate-950/80 text-slate-400 uppercase font-semibold text-xs border-b border-slate-800">
                     <tr>
                       <th className="px-6 py-4">Пользователь</th>
+                      <th className="px-6 py-4">Роль</th>
                       <th className="px-6 py-4">Тарифный план</th>
-                      <th className="px-6 py-4">Кредиты (Refund Policy)</th>
+                      <th className="px-6 py-4">Кредиты (Refund)</th>
+                      <th className="px-6 py-4">Lifetime Free</th>
                       <th className="px-6 py-4">Десктопные лицензии</th>
                       <th className="px-6 py-4 text-right">Управление</th>
                     </tr>
@@ -553,9 +617,27 @@ export default function AdminPanel() {
                       const userLicenses = licensesList.filter(l => l.user_id === u.id);
                       return (
                         <tr key={u.id} className="hover:bg-slate-800/20 transition">
+                          {/* User Email & ID */}
                           <td className="px-6 py-4">
                             <div className="font-semibold text-white">{u.email}</div>
                             <div className="text-[11px] text-slate-500 font-mono mt-0.5">{u.id}</div>
+                          </td>
+
+                          {/* Role Selector Dropdown */}
+                          <td className="px-6 py-4">
+                            <select
+                              value={u.role || 'user'}
+                              onChange={(e) => handleUpdateRole(u.id, e.target.value)}
+                              disabled={updatingUserId === u.id}
+                              className={`border rounded-lg px-2.5 py-1 text-xs font-bold focus:outline-none ${
+                                u.role === 'admin' 
+                                  ? 'bg-purple-950/60 border-purple-800 text-purple-300' 
+                                  : 'bg-slate-950 border-slate-800 text-slate-300'
+                              }`}
+                            >
+                              <option value="user">user</option>
+                              <option value="admin">admin</option>
+                            </select>
                           </td>
 
                           {/* Subscription Plan Dropdown */}
@@ -575,7 +657,7 @@ export default function AdminPanel() {
                             </select>
                           </td>
 
-                          {/* Generation Credits */}
+                          {/* Generation Credits (Refund Policy) */}
                           <td className="px-6 py-4">
                             <div className="flex items-center gap-2">
                               <span className="font-mono font-bold text-indigo-400 bg-indigo-950/60 px-2.5 py-1 rounded-lg border border-indigo-800/40 text-xs">
@@ -600,6 +682,22 @@ export default function AdminPanel() {
                             </div>
                           </td>
 
+                          {/* Lifetime Free Toggle */}
+                          <td className="px-6 py-4">
+                            <button
+                              onClick={() => handleToggleLifetime(u.id, u.is_lifetime_free)}
+                              disabled={updatingUserId === u.id}
+                              className={`px-3 py-1 rounded-xl text-xs font-bold transition inline-flex items-center gap-1.5 border ${
+                                u.is_lifetime_free
+                                  ? 'bg-emerald-950/60 border-emerald-800 text-emerald-400'
+                                  : 'bg-slate-950 border-slate-800 text-slate-500 hover:text-slate-300'
+                              }`}
+                            >
+                              {u.is_lifetime_free ? <Check className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+                              <span>{u.is_lifetime_free ? 'Active' : 'Off'}</span>
+                            </button>
+                          </td>
+
                           {/* Desktop Keys */}
                           <td className="px-6 py-4">
                             <div className="flex flex-col gap-1">
@@ -622,24 +720,39 @@ export default function AdminPanel() {
                             </div>
                           </td>
 
-                          {/* Action Buttons */}
+                          {/* Action Buttons: Generate License + Cancel Sub + Delete User */}
                           <td className="px-6 py-4 text-right">
                             <div className="flex items-center justify-end gap-2">
+                              {/* Generate License Key */}
                               <button
                                 onClick={() => handleGenerateLicense(u.id, u.email)}
                                 disabled={updatingUserId === u.id}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 rounded-lg text-xs font-semibold text-white shadow-md shadow-indigo-600/20 transition"
+                                title="Выдать лицензионный ключ"
                               >
                                 <Key className="w-3.5 h-3.5" />
                                 Выдать ключ
                               </button>
+
+                              {/* Cancel Subscription */}
                               {u.subscription_status !== 'canceled' && u.subscription_status !== 'free' && (
                                 <button
                                   onClick={() => handleCancelSubscription(u.id)}
                                   className="px-2.5 py-1.5 bg-rose-950/40 hover:bg-rose-900/60 border border-rose-800/50 text-rose-300 rounded-lg text-xs font-medium transition"
                                   title="Отменить подписку"
                                 >
-                                  Отменить подписку
+                                  Отменить
+                                </button>
+                              )}
+
+                              {/* Delete User */}
+                              {u.id !== user?.id && (
+                                <button
+                                  onClick={() => handleDeleteUser(u.id, u.email)}
+                                  className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/40 rounded-lg transition"
+                                  title="Удалить пользователя"
+                                >
+                                  <Trash2 className="w-4 h-4" />
                                 </button>
                               )}
                             </div>
@@ -1003,6 +1116,154 @@ export default function AdminPanel() {
         )}
 
       </div>
+
+      {/* MODAL: ADD NEW USER */}
+      {isAddUserModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
+          <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 md:p-8 max-w-md w-full shadow-2xl space-y-6">
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-indigo-950/60 text-indigo-400 border border-indigo-800/50 rounded-xl">
+                  <UserPlus className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Добавить пользователя</h3>
+                  <p className="text-xs text-slate-400">Создать аккаунт и настроить тариф</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsAddUserModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-white rounded-lg transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {createUserError && (
+              <div className="p-3 bg-rose-950/60 border border-rose-800 text-rose-300 rounded-xl text-xs flex items-center gap-2">
+                <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                {createUserError}
+              </div>
+            )}
+
+            <form onSubmit={handleCreateUser} className="space-y-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Email адрес
+                </label>
+                <div className="relative">
+                  <Mail className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                  <input
+                    type="email"
+                    value={newEmail}
+                    onChange={(e) => setNewEmail(e.target.value)}
+                    placeholder="user@example.com"
+                    required
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-400 mb-1">
+                  Пароль
+                </label>
+                <div className="relative">
+                  <Lock className="w-4 h-4 absolute left-3 top-3 text-slate-500" />
+                  <input
+                    type="password"
+                    value={newPassword}
+                    onChange={(e) => setNewPassword(e.target.value)}
+                    placeholder="••••••••"
+                    required
+                    minLength={6}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl pl-9 pr-4 py-2 text-sm text-white focus:outline-none focus:border-indigo-500"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">
+                    Роль
+                  </label>
+                  <select
+                    value={newRole}
+                    onChange={(e) => setNewRole(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">
+                    Тариф
+                  </label>
+                  <select
+                    value={newSubStatus}
+                    onChange={(e) => setNewSubStatus(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs font-bold text-white focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="free">Free</option>
+                    <option value="onetime">One-Time Pass</option>
+                    <option value="monthly">Monthly Pro</option>
+                    <option value="yearly">Yearly Pro</option>
+                    <option value="lifetime">Lifetime</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-400 mb-1">
+                    Кредиты
+                  </label>
+                  <input
+                    type="number"
+                    min={0}
+                    value={newCredits}
+                    onChange={(e) => setNewCredits(e.target.value)}
+                    className="w-full bg-slate-950 border border-slate-800 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:border-indigo-500 font-mono"
+                  />
+                </div>
+
+                <div className="flex flex-col justify-end">
+                  <label className="flex items-center gap-2 p-2 bg-slate-950 border border-slate-800 rounded-xl cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newIsLifetime}
+                      onChange={(e) => setNewIsLifetime(e.target.checked)}
+                      className="rounded border-slate-800 text-indigo-600 focus:ring-indigo-500"
+                    />
+                    <span className="text-xs font-semibold text-slate-300">Lifetime Free</span>
+                  </label>
+                </div>
+              </div>
+
+              <div className="pt-2 flex items-center justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setIsAddUserModalOpen(false)}
+                  className="px-4 py-2 bg-slate-800 hover:bg-slate-700 rounded-xl text-xs font-semibold text-slate-300 transition"
+                >
+                  Отмена
+                </button>
+                <button
+                  type="submit"
+                  disabled={creatingUser}
+                  className="px-5 py-2 bg-indigo-600 hover:bg-indigo-500 rounded-xl text-xs font-semibold text-white shadow-lg shadow-indigo-600/30 transition flex items-center gap-2"
+                >
+                  {creatingUser ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <UserPlus className="w-3.5 h-3.5" />}
+                  Создать
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
