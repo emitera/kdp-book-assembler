@@ -8,12 +8,12 @@ type Bindings = {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
   JWT_SECRET: string;
-  PAYPAL_CLIENT_ID: string;
-  PAYPAL_CLIENT_SECRET: string;
-  PAYPAL_LIVE_MODE?: string;
   FRONTEND_URL?: string;
   RESEND_API_KEY?: string;
   SUPPORT_EMAIL?: string;
+  PADDLE_API_KEY?: string;
+  PADDLE_VENDOR_ID?: string;
+  PADDLE_WEBHOOK_SECRET?: string;
 };
 
 const app = new Hono<{ Bindings: Bindings }>();
@@ -38,15 +38,414 @@ app.use('/*', cors({
     return 'https://birdypages.io';
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization'],
+  allowHeaders: ['Content-Type', 'Authorization', 'x-paddle-signature'],
   exposeHeaders: ['Content-Length'],
   maxAge: 600
 }));
 
-app.get('/', (c) => c.text('KDP Smart Assembler Backend API Running'));
+app.get('/', (c) => c.text('Birdy Pages Backend API Running (Paddle MoR Exclusive)'));
+
+// ==============================================================================
+// HELPER FUNCTIONS
+// ==============================================================================
 
 /**
- * Creates checkout session and generates checkout redirection link.
+ * Generate Cryptographic License Key Format: BIRDY-XXXX-XXXX-XXXX
+ */
+function generateLicenseKey(): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // Avoid ambiguous chars (0, O, 1, I)
+  const getRandomBlock = (len: number) => {
+    let result = '';
+    const randomBytes = new Uint8Array(len);
+    crypto.getRandomValues(randomBytes);
+    for (let i = 0; i < len; i++) {
+      result += chars[randomBytes[i] % chars.length];
+    }
+    return result;
+  };
+  return `BIRDY-${getRandomBlock(4)}-${getRandomBlock(4)}-${getRandomBlock(4)}`;
+}
+
+/**
+ * Send Transactional Email via Resend API
+ */
+async function sendResendEmail(
+  env: Bindings,
+  to: string,
+  subject: string,
+  html: string,
+  replyTo?: string
+) {
+  const apiKey = env.RESEND_API_KEY;
+  if (!apiKey) {
+    console.warn('[Resend] RESEND_API_KEY is not configured. Email not dispatched.');
+    return false;
+  }
+  try {
+    const fromEmail = env.SUPPORT_EMAIL || 'support@birdypages.io';
+    const res = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        from: `Birdy Pages <${fromEmail}>`,
+        to: [to],
+        reply_to: replyTo,
+        subject,
+        html
+      })
+    });
+    return res.ok;
+  } catch (err) {
+    console.error('[Resend] Error dispatching email:', err);
+    return false;
+  }
+}
+
+/**
+ * Helper to send email notification to support@birdypages.io
+ */
+async function sendSupportEmail(
+  env: Bindings,
+  ticket: { email: string; subject: string; category: string; message: string; userId?: string | null; ticketId?: string }
+) {
+  const supportEmail = env.SUPPORT_EMAIL || 'support@birdypages.io';
+  const emailHtml = `
+    <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
+      <div style="border-bottom: 2px solid #6366f1; padding-bottom: 12px; margin-bottom: 16px;">
+        <h2 style="color: #4f46e5; margin: 0; font-size: 20px;">Birdy Pages Support Request</h2>
+        <span style="font-size: 12px; color: #64748b;">Ticket ID: ${ticket.ticketId || 'N/A'}</span>
+      </div>
+      <table style="width: 100%; font-size: 14px; margin-bottom: 20px; border-collapse: collapse;">
+        <tr>
+          <td style="font-weight: bold; width: 130px; color: #475569; padding: 6px 0;">From Email:</td>
+          <td style="padding: 6px 0;"><a href="mailto:${ticket.email}" style="color: #4f46e5; font-weight: 600;">${ticket.email}</a></td>
+        </tr>
+        <tr>
+          <td style="font-weight: bold; color: #475569; padding: 6px 0;">User ID:</td>
+          <td style="padding: 6px 0;">${ticket.userId || 'Guest (Not authenticated)'}</td>
+        </tr>
+        <tr>
+          <td style="font-weight: bold; color: #475569; padding: 6px 0;">Category:</td>
+          <td style="padding: 6px 0;"><span style="background: #eef2ff; color: #4338ca; padding: 3px 8px; border-radius: 6px; font-weight: 600; font-size: 12px;">${ticket.category.toUpperCase()}</span></td>
+        </tr>
+        <tr>
+          <td style="font-weight: bold; color: #475569; padding: 6px 0;">Subject:</td>
+          <td style="padding: 6px 0; font-weight: 600;">${ticket.subject}</td>
+        </tr>
+      </table>
+      <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; border-radius: 8px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; color: #334155;">${ticket.message}</div>
+      <div style="margin-top: 24px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 12px;">
+        Birdy Pages Automated Support Notification • ${new Date().toUTCString()}
+      </div>
+    </div>
+  `;
+
+  await sendResendEmail(
+    env,
+    supportEmail,
+    `[Support - ${ticket.category.toUpperCase()}] ${ticket.subject}`,
+    emailHtml,
+    ticket.email
+  );
+}
+
+// ==============================================================================
+// 1. PADDLE WEBHOOK ROUTE (Merchant of Record)
+// ==============================================================================
+/**
+ * Paddle Webhook Endpoint (transaction.completed, subscription.created, etc.)
+ * POST /api/webhooks/paddle
+ */
+app.post('/api/webhooks/paddle', async (c) => {
+  const supabase = getSupabaseClient(c.env);
+
+  try {
+    const rawBody = await c.req.text();
+    let event: any;
+    try {
+      event = JSON.parse(rawBody);
+    } catch {
+      return c.json({ error: 'Invalid JSON payload' }, 400);
+    }
+
+    const eventType = event.event_type || event.alert_name;
+    console.log(`[Paddle Webhook] Received event: ${eventType}`);
+
+    if (eventType === 'transaction.completed' || eventType === 'subscription.created') {
+      const data = event.data || event;
+      const customerEmail = data.customer?.email || data.user_email || data.customer_email;
+      const customData = data.custom_data || {};
+      let userId = customData.userId || customData.user_id;
+
+      // Lookup user if userId not provided in customData
+      if (!userId && customerEmail) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('id')
+          .ilike('email', customerEmail)
+          .maybeSingle();
+        userId = profile?.id;
+      }
+
+      // Generate BIRDY-XXXX-XXXX-XXXX Desktop License Key
+      const licenseKey = generateLicenseKey();
+
+      if (userId) {
+        // Record license in database
+        await supabase.from('desktop_licenses').insert({
+          user_id: userId,
+          license_key: licenseKey,
+          status: 'active',
+          expires_at: null
+        });
+
+        // Update profile subscription status
+        await supabase
+          .from('profiles')
+          .update({
+            subscription_status: customData.plan_type || 'monthly',
+            has_lifetime_access: customData.plan_type === 'lifetime',
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', userId);
+      }
+
+      // Send License Key Email to Customer via Resend
+      if (customerEmail) {
+        const emailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; background-color: #ffffff;">
+            <h2 style="color: #4f46e5; text-align: center; margin-top: 0;">Welcome to Birdy Pages Desktop & Pro! 🚀</h2>
+            <p style="color: #334155; font-size: 15px;">Thank you for your purchase. Here is your official license key for Birdy Pages:</p>
+            <div style="background: #f1f5f9; padding: 16px; border-radius: 8px; text-align: center; margin: 24px 0; border: 1px solid #cbd5e1;">
+              <span style="font-size: 24px; font-family: monospace; font-weight: bold; letter-spacing: 2px; color: #1e293b;">${licenseKey}</span>
+            </div>
+            <p style="color: #64748b; font-size: 14px; line-height: 1.5;">
+              Enter this key in the Birdy Pages Desktop app or Web version to activate all Pro features, local AI upscaling, and unlimited zero-crop book generation.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 24px 0;" />
+            <p style="color: #94a3b8; font-size: 12px; text-align: center; margin-bottom: 0;">
+              Questions? Reach us anytime at ${c.env.SUPPORT_EMAIL || 'support@birdypages.io'}
+            </p>
+          </div>
+        `;
+
+        await sendResendEmail(
+          c.env,
+          customerEmail,
+          'Your Birdy Pages License Key 🔑',
+          emailHtml
+        );
+      }
+
+      return c.json({ success: true, license_key: licenseKey });
+    }
+
+    if (eventType === 'subscription.canceled') {
+      const data = event.data || event;
+      const customerEmail = data.customer?.email || data.user_email;
+      if (customerEmail) {
+        await supabase
+          .from('profiles')
+          .update({ subscription_status: 'canceled', updated_at: new Date().toISOString() })
+          .ilike('email', customerEmail);
+      }
+      return c.json({ success: true, message: 'Subscription canceled' });
+    }
+
+    return c.json({ received: true });
+  } catch (err: any) {
+    console.error('[Paddle Webhook Error]', err);
+    return c.json({ error: 'Webhook processing failed', details: err.message }, 500);
+  }
+});
+
+// ==============================================================================
+// 2. DESKTOP BRIDGE: CLIENT LICENSE VALIDATION ENDPOINT
+// ==============================================================================
+/**
+ * Desktop App License Validation
+ * POST /api/desktop/validate-license
+ */
+app.post('/api/desktop/validate-license', async (c) => {
+  const supabase = getSupabaseClient(c.env);
+  const body = await c.req.json<{ license_key: string; hardware_id: string }>();
+
+  if (!body.license_key || !body.hardware_id) {
+    return c.json({ error: 'license_key and hardware_id are required' }, 400);
+  }
+
+  const { data: license, error } = await supabase
+    .from('desktop_licenses')
+    .select('*, profiles:user_id(email, subscription_status)')
+    .eq('license_key', body.license_key.trim().toUpperCase())
+    .maybeSingle();
+
+  if (error || !license) {
+    return c.json({ valid: false, error: 'INVALID_KEY', message: 'License key not found' }, 404);
+  }
+
+  if (license.status === 'revoked') {
+    return c.json({ valid: false, error: 'REVOKED', message: 'License has been revoked' }, 403);
+  }
+
+  if (license.expires_at && new Date(license.expires_at) < new Date()) {
+    return c.json({ valid: false, error: 'EXPIRED', message: 'License has expired' }, 403);
+  }
+
+  // Device Binding: Bind hardware_id if unassigned, or verify device match
+  if (!license.hardware_id) {
+    await supabase
+      .from('desktop_licenses')
+      .update({ hardware_id: body.hardware_id, updated_at: new Date().toISOString() })
+      .eq('id', license.id);
+  } else if (license.hardware_id !== body.hardware_id) {
+    return c.json({
+      valid: false,
+      error: 'DEVICE_MISMATCH',
+      message: 'License is bound to another computer hardware ID',
+    }, 403);
+  }
+
+  return c.json({
+    valid: true,
+    license_id: license.id,
+    user_email: (license.profiles as any)?.email,
+    plan: (license.profiles as any)?.subscription_status || 'desktop_pro',
+    expires_at: license.expires_at
+  });
+});
+
+// ==============================================================================
+// 3. ADMIN CRM: DESKTOP LICENSES MANAGEMENT
+// ==============================================================================
+
+/**
+ * Admin API: Fetch All Desktop Licenses
+ * GET /api/admin/licenses
+ */
+app.get('/api/admin/licenses', async (c) => {
+  try {
+    const supabase = getSupabaseClient(c.env);
+    const userId = c.req.query('user_id');
+
+    let query = supabase
+      .from('desktop_licenses')
+      .select('*, profiles:user_id(id, email, subscription_status)')
+      .order('created_at', { ascending: false });
+
+    if (userId) {
+      query = query.eq('user_id', userId);
+    }
+
+    const { data: licenses, error } = await query;
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ licenses: licenses || [] });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to fetch licenses' }, 500);
+  }
+});
+
+/**
+ * Admin API: Manually Generate Free License for a User
+ * POST /api/admin/generate-license
+ */
+app.post('/api/admin/generate-license', async (c) => {
+  try {
+    const supabase = getSupabaseClient(c.env);
+    const body = await c.req.json<{ user_id: string; expires_at?: string; send_email?: boolean }>();
+
+    if (!body.user_id) {
+      return c.json({ error: 'user_id is required' }, 400);
+    }
+
+    const licenseKey = generateLicenseKey();
+
+    const { data: license, error } = await supabase
+      .from('desktop_licenses')
+      .insert({
+        user_id: body.user_id,
+        license_key: licenseKey,
+        status: 'active',
+        expires_at: body.expires_at || null
+      })
+      .select()
+      .single();
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    // Optional: Send email notification to user
+    if (body.send_email) {
+      const { data: userProfile } = await supabase
+        .from('profiles')
+        .select('email')
+        .eq('id', body.user_id)
+        .single();
+
+      if (userProfile?.email) {
+        const emailHtml = `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; border: 1px solid #e2e8f0; border-radius: 10px;">
+            <h2 style="color: #4f46e5;">Birdy Pages Desktop License Issued 🔑</h2>
+            <p>Your administrator has granted you a free license for Birdy Pages Desktop:</p>
+            <div style="background: #f1f5f9; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
+              <span style="font-size: 22px; font-family: monospace; font-weight: bold; letter-spacing: 2px;">${licenseKey}</span>
+            </div>
+            <p style="color: #64748b; font-size: 14px;">Enter this license key in Birdy Pages to unlock full Pro capabilities.</p>
+          </div>
+        `;
+        await sendResendEmail(c.env, userProfile.email, 'Your Birdy Pages Desktop License 🔑', emailHtml);
+      }
+    }
+
+    return c.json({ success: true, license });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to generate license' }, 500);
+  }
+});
+
+/**
+ * Admin API: Revoke a Desktop License
+ * POST /api/admin/revoke-license
+ */
+app.post('/api/admin/revoke-license', async (c) => {
+  try {
+    const supabase = getSupabaseClient(c.env);
+    const body = await c.req.json<{ license_id: string }>();
+
+    if (!body.license_id) {
+      return c.json({ error: 'license_id is required' }, 400);
+    }
+
+    const { data: license, error } = await supabase
+      .from('desktop_licenses')
+      .update({ status: 'revoked', updated_at: new Date().toISOString() })
+      .eq('id', body.license_id)
+      .select()
+      .single();
+
+    if (error) {
+      return c.json({ error: error.message }, 500);
+    }
+
+    return c.json({ success: true, license });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to revoke license' }, 500);
+  }
+});
+
+// ==============================================================================
+// 4. CORE CHECKOUT & SUPPORT ROUTES
+// ==============================================================================
+
+/**
+ * Creates checkout session (Paddle sole provider)
  * POST /api/create-checkout
  */
 app.post('/api/create-checkout', async (c) => {
@@ -54,16 +453,8 @@ app.post('/api/create-checkout', async (c) => {
     const body = await c.req.json();
     const { email, userId, projectId, type, provider, amount } = body;
 
-    if (!email || !type || !provider || !amount) {
+    if (!email || !type || !amount) {
       return c.json({ error: 'Missing required checkout parameters' }, 400);
-    }
-
-    if (type === 'project_pass' && !projectId) {
-      return c.json({ error: 'Project ID is required for a project pass' }, 400);
-    }
-
-    if (type === 'subscription' && !userId) {
-      return c.json({ error: 'User ID is required for subscriptions' }, 400);
     }
 
     const session = await createCheckoutSession(c.env, {
@@ -71,7 +462,7 @@ app.post('/api/create-checkout', async (c) => {
       userId,
       projectId,
       type,
-      provider,
+      provider: provider || 'paddle',
       amount: parseFloat(amount)
     });
 
@@ -80,226 +471,6 @@ app.post('/api/create-checkout', async (c) => {
     return c.json({ error: err.message || 'Checkout session failed' }, 500);
   }
 });
-
-/**
- * PayPal webhook notification listener
- * POST /api/webhook/paypal
- */
-app.post('/api/webhook/paypal', async (c) => {
-  try {
-    const data = await c.req.json();
-    const result = await handlePaymentWebhook(c.env, 'paypal', data);
-    return c.json(result);
-  } catch (err: any) {
-    console.error('PayPal webhook error:', err);
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-/**
- * Allpay webhook notification listener
- * POST /api/webhook/allpay
- */
-app.post('/api/webhook/allpay', async (c) => {
-  try {
-    // Allpay sends parameters as urlencoded body (application/x-www-form-urlencoded)
-    const data = await c.req.parseBody();
-    const result = await handlePaymentWebhook(c.env, 'allpay', data);
-    return c.json(result);
-  } catch (err: any) {
-    console.error('Allpay webhook error:', err);
-    return c.json({ error: err.message }, 500);
-  }
-});
-
-/**
- * Checks payments DB and issues custom JWT to grant Pro generation access.
- * POST /api/get-token
- */
-app.post('/api/get-token', async (c) => {
-  try {
-    const body = await c.req.json();
-    const { projectId, userId } = body;
-    const authHeader = c.req.header('Authorization');
-    const supabase = getSupabaseClient(c.env);
-
-    // Option A: Verify subscription status (requires User authentication)
-    if (userId) {
-      const user = await verifyUserSession(c.env, authHeader);
-      if (!user || user.id !== userId) {
-        return c.json({ error: 'Unauthorized: Invalid user session' }, 401);
-      }
-
-      // Query profiles table for active subscription
-      const { data: profile, error } = await supabase
-        .from('profiles')
-        .select('subscription_status, subscription_expires_at, email')
-        .eq('id', user.id)
-        .single();
-
-      if (error || !profile) {
-        return c.json({ error: 'Profile not found' }, 404);
-      }
-
-      const isSubbed = profile.subscription_status === 'pro';
-      const isNotExpired = !profile.subscription_expires_at || 
-                           new Date(profile.subscription_expires_at) > new Date();
-
-      if (isSubbed && isNotExpired) {
-        const token = await generateProJWT(c.env, {
-          userId: user.id,
-          email: profile.email || user.email || '',
-          type: 'subscription'
-        });
-        return c.json({ token });
-      }
-
-      return c.json({ error: 'Pro subscription required' }, 403);
-    }
-
-    // Option B: Verify single-project pass (allows guests/anonymous tokens)
-    if (projectId) {
-      const { data: projectPass, error } = await supabase
-        .from('projects_passes')
-        .select('project_id, email, status')
-        .eq('project_id', projectId)
-        .eq('status', 'active')
-        .single();
-
-      if (error || !projectPass) {
-        return c.json({ error: 'No active project pass found' }, 403);
-      }
-
-      const token = await generateProJWT(c.env, {
-        projectId: projectPass.project_id,
-        email: projectPass.email,
-        type: 'project_pass'
-      });
-
-      return c.json({ token });
-    }
-
-    return c.json({ error: 'Missing projectId or userId' }, 400);
-  } catch (err: any) {
-    return c.json({ error: err.message || 'Token generation failed' }, 500);
-  }
-});
-
-/**
- * Developer Simulator Endpoint
- * Triggers successful webhook call and redirects to frontend dashboard.
- * GET /api/simulate-payment
- */
-app.get('/api/simulate-payment', async (c) => {
-  try {
-    const provider = c.req.query('provider') as 'paypal' | 'allpay';
-    const amount = parseFloat(c.req.query('amount') || '0');
-    const customId = c.req.query('customId') || '';
-
-    if (!provider || !customId) {
-      return c.text('Invalid simulator parameters', 400);
-    }
-
-    // Mock payment gateway callback object
-    const mockPayload: any = provider === 'paypal' 
-      ? {
-          event_type: 'PAYMENT.CAPTURE.COMPLETED',
-          resource: {
-            id: `MOCK-PAYMENT-${Date.now()}`,
-            status: 'COMPLETED',
-            amount: { value: amount.toFixed(2) },
-            custom_id: customId
-          }
-        }
-      : {
-          MerchantTradeNo: `MOCK-PAY-${Date.now()}`,
-          RtnCode: '1',
-          TradeAmt: amount.toString(),
-          CustomField1: customId
-        };
-
-    const metadata = JSON.parse(customId);
-    
-    // Invoke handler directly
-    await handlePaymentWebhook(c.env, provider, mockPayload);
-
-    // Redirect back to frontend
-    const frontUrl = c.env.FRONTEND_URL || 'http://localhost:5173';
-    return c.redirect(`${frontUrl}?payment=success&projectId=${metadata.projectId || ''}`);
-  } catch (err: any) {
-    return c.text(`Simulator Error: ${err.message}`, 500);
-  }
-});
-
-/**
- * Helper to send email notification to support@birdypages.io via Resend or HTTP dispatch
- */
-async function sendSupportEmail(
-  env: Bindings,
-  ticket: { email: string; subject: string; category: string; message: string; userId?: string | null; ticketId?: string }
-) {
-  const supportEmail = env.SUPPORT_EMAIL || 'support@birdypages.io';
-  const apiKey = env.RESEND_API_KEY;
-
-  if (apiKey) {
-    try {
-      const emailHtml = `
-        <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; padding: 24px; color: #1e293b; max-width: 600px; margin: 0 auto; border: 1px solid #e2e8f0; border-radius: 16px; background-color: #ffffff;">
-          <div style="border-bottom: 2px solid #6366f1; padding-bottom: 12px; margin-bottom: 16px;">
-            <h2 style="color: #4f46e5; margin: 0; font-size: 20px;">Birdy Pages Support Request</h2>
-            <span style="font-size: 12px; color: #64748b;">Ticket ID: ${ticket.ticketId || 'N/A'}</span>
-          </div>
-          <table style="width: 100%; font-size: 14px; margin-bottom: 20px; border-collapse: collapse;">
-            <tr>
-              <td style="font-weight: bold; width: 130px; color: #475569; padding: 6px 0;">From Email:</td>
-              <td style="padding: 6px 0;"><a href="mailto:${ticket.email}" style="color: #4f46e5; font-weight: 600;">${ticket.email}</a></td>
-            </tr>
-            <tr>
-              <td style="font-weight: bold; color: #475569; padding: 6px 0;">User ID:</td>
-              <td style="padding: 6px 0;">${ticket.userId || 'Guest (Not authenticated)'}</td>
-            </tr>
-            <tr>
-              <td style="font-weight: bold; color: #475569; padding: 6px 0;">Category:</td>
-              <td style="padding: 6px 0;"><span style="background: #eef2ff; color: #4338ca; padding: 3px 8px; border-radius: 6px; font-weight: 600; font-size: 12px;">${ticket.category.toUpperCase()}</span></td>
-            </tr>
-            <tr>
-              <td style="font-weight: bold; color: #475569; padding: 6px 0;">Subject:</td>
-              <td style="padding: 6px 0; font-weight: 600;">${ticket.subject}</td>
-            </tr>
-          </table>
-          <div style="background: #f8fafc; border-left: 4px solid #6366f1; padding: 16px; border-radius: 8px; font-size: 14px; line-height: 1.6; white-space: pre-wrap; color: #334155;">${ticket.message}</div>
-          <div style="margin-top: 24px; font-size: 11px; color: #94a3b8; text-align: center; border-top: 1px solid #f1f5f9; padding-top: 12px;">
-            Birdy Pages Automated Support Notification • ${new Date().toUTCString()}
-          </div>
-        </div>
-      `;
-
-      const response = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          from: 'Birdy Pages Support <onboarding@resend.dev>',
-          to: [supportEmail],
-          reply_to: ticket.email,
-          subject: `[Support - ${ticket.category.toUpperCase()}] ${ticket.subject}`,
-          html: emailHtml
-        })
-      });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.warn('Resend API dispatch notice:', response.status, errorText);
-      }
-    } catch (e) {
-      console.error('Resend dispatch error:', e);
-    }
-  } else {
-    console.log(`[Support Ticket Received] To: ${supportEmail} | From: ${ticket.email} | Subject: ${ticket.subject} | Body: ${ticket.message}`);
-  }
-}
 
 /**
  * Public API: Submit Support Ticket and send email to support
@@ -407,15 +578,17 @@ app.post('/api/admin/update-ticket-status', async (c) => {
   }
 });
 
+// ==============================================================================
+// 5. ADMIN CRM: USER & CREDITS MANAGEMENT
+// ==============================================================================
+
 /**
- * Admin API: Fetch all registered users with generation credits and subscription metadata
+ * Admin API: Fetch all registered users
  * GET /api/admin/users
  */
 app.get('/api/admin/users', async (c) => {
   try {
     const supabase = getSupabaseClient(c.env);
-    
-    // Fetch all user profiles from Supabase
     const { data: users, error } = await supabase
       .from('profiles')
       .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits, created_at')
@@ -432,7 +605,7 @@ app.get('/api/admin/users', async (c) => {
 });
 
 /**
- * Admin API: Update User Generation Credits (Add, Subtract, Set)
+ * Admin API: Update User Generation Credits (Refund Policy +1, +5, -1)
  * POST /api/admin/update-user-credits
  */
 app.post('/api/admin/update-user-credits', async (c) => {
@@ -474,7 +647,7 @@ app.post('/api/admin/update-user-credits', async (c) => {
 });
 
 /**
- * Admin API: Update User Subscription Plan (Free, One-Time, Monthly, Yearly, Canceled)
+ * Admin API: Update User Subscription Plan
  * POST /api/admin/update-user-plan
  */
 app.post('/api/admin/update-user-plan', async (c) => {
@@ -526,7 +699,6 @@ app.post('/api/admin/cancel-subscription', async (c) => {
 
     const supabase = getSupabaseClient(c.env);
 
-    // 1. Update status in database to canceled
     const { data: updated, error } = await supabase
       .from('profiles')
       .update({
@@ -541,11 +713,6 @@ app.post('/api/admin/cancel-subscription', async (c) => {
       return c.json({ error: error.message }, 500);
     }
 
-    // TODO: Phase 16 Gateway Subscription Cancellation API Call:
-    // When Paddle / Allpay subscription IDs are stored in the user profile,
-    // call Paddle API (DELETE https://api.paddle.com/subscriptions/{subscription_id})
-    // or Allpay recurring cancellation endpoint to cancel recurring charges at the gateway level.
-
     return c.json({ success: true, profile: updated, message: 'Subscription canceled successfully' });
   } catch (err: any) {
     return c.json({ error: err.message || 'Failed to cancel subscription' }, 500);
@@ -553,7 +720,7 @@ app.post('/api/admin/cancel-subscription', async (c) => {
 });
 
 /**
- * Admin API: Toggle Lifetime Free Access for a specific user
+ * Admin API: Toggle Lifetime Free Access
  * POST /api/admin/toggle-lifetime
  */
 app.post('/api/admin/toggle-lifetime', async (c) => {
@@ -616,86 +783,6 @@ app.post('/api/admin/update-user-role', async (c) => {
 });
 
 /**
- * Admin API: Update User Subscription Status
- * POST /api/admin/update-user-subscription
- */
-app.post('/api/admin/update-user-subscription', async (c) => {
-  try {
-    const body = await c.req.json();
-    const { userId, subscriptionStatus } = body;
-
-    if (!userId || !subscriptionStatus) {
-      return c.json({ error: 'Missing userId or subscriptionStatus' }, 400);
-    }
-
-    const supabase = getSupabaseClient(c.env);
-    const { data: updated, error } = await supabase
-      .from('profiles')
-      .update({ subscription_status: subscriptionStatus })
-      .eq('id', userId)
-      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
-      .single();
-
-    if (error) {
-      return c.json({ error: error.message }, 500);
-    }
-
-    return c.json({ success: true, profile: updated });
-  } catch (err: any) {
-    return c.json({ error: err.message || 'Failed to update subscription status' }, 500);
-  }
-});
-
-/**
- * Admin API: Create New User
- * POST /api/admin/create-user
- */
-app.post('/api/admin/create-user', async (c) => {
-  try {
-    const body = await c.req.json();
-    const { email, password, role, subscriptionStatus, isLifetimeFree } = body;
-
-    if (!email || !password) {
-      return c.json({ error: 'Email and password are required' }, 400);
-    }
-
-    const supabase = getSupabaseClient(c.env);
-
-    // 1. Create auth user using Supabase Admin Auth API
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true
-    });
-
-    if (authError || !authData.user) {
-      return c.json({ error: authError?.message || 'Failed to create user in Auth system' }, 500);
-    }
-
-    // 2. Upsert profile parameters
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .upsert({
-        id: authData.user.id,
-        email,
-        role: role || 'user',
-        subscription_status: subscriptionStatus || 'free',
-        is_lifetime_free: !!isLifetimeFree
-      })
-      .select()
-      .single();
-
-    if (profileError) {
-      return c.json({ error: profileError.message }, 500);
-    }
-
-    return c.json({ success: true, profile });
-  } catch (err: any) {
-    return c.json({ error: err.message || 'Failed to create user' }, 500);
-  }
-});
-
-/**
  * Admin API: Delete User
  * POST /api/admin/delete-user
  */
@@ -710,14 +797,8 @@ app.post('/api/admin/delete-user', async (c) => {
 
     const supabase = getSupabaseClient(c.env);
 
-    // 1. Delete from profiles table
     await supabase.from('profiles').delete().eq('id', userId);
-
-    // 2. Delete from auth.users via Admin API
-    const { error: deleteError } = await supabase.auth.admin.deleteUser(userId);
-    if (deleteError) {
-      console.warn('Auth user deletion warning:', deleteError);
-    }
+    await supabase.auth.admin.deleteUser(userId);
 
     return c.json({ success: true });
   } catch (err: any) {
@@ -725,8 +806,12 @@ app.post('/api/admin/delete-user', async (c) => {
   }
 });
 
+// ==============================================================================
+// 6. PRICING & PADDLE PAYMENT SETTINGS APIS
+// ==============================================================================
+
 /**
- * Public API: Fetch dynamic app pricing settings
+ * Public API: Fetch dynamic app pricing
  * GET /api/settings
  */
 app.get('/api/settings', async (c) => {
@@ -749,7 +834,7 @@ app.get('/api/settings', async (c) => {
 });
 
 /**
- * Public API: Fetch dynamic payment gateway settings (for client checkout)
+ * Public API: Fetch dynamic payment gateway settings (Paddle Exclusive)
  * GET /api/payment-settings
  */
 app.get('/api/payment-settings', async (c) => {
@@ -757,38 +842,33 @@ app.get('/api/payment-settings', async (c) => {
     const supabase = getSupabaseClient(c.env);
     const { data: settings, error } = await supabase
       .from('payment_settings')
-      .select('active_gateway, paddle_environment, paddle_client_token, paddle_price_onetime, paddle_price_monthly, paddle_price_yearly, allpay_store_id, allpay_product_onetime, allpay_product_monthly, allpay_product_yearly')
+      .select('active_gateway, paddle_environment, paddle_client_token, paddle_price_onetime, paddle_price_monthly, paddle_price_yearly')
       .eq('id', 'global')
       .single();
 
     if (error) {
-      console.warn('Could not fetch payment_settings, returning defaults:', error.message);
       return c.json({
-        active_gateway: 'allpay',
+        active_gateway: 'paddle',
         paddle_environment: 'sandbox',
         paddle_client_token: '',
         paddle_price_onetime: '',
         paddle_price_monthly: '',
-        paddle_price_yearly: '',
-        allpay_store_id: '',
-        allpay_product_onetime: '',
-        allpay_product_monthly: '',
-        allpay_product_yearly: ''
+        paddle_price_yearly: ''
       });
     }
 
     return c.json(settings || {
-      active_gateway: 'allpay',
+      active_gateway: 'paddle',
       paddle_environment: 'sandbox'
     });
   } catch (err: any) {
     console.error('Error in /api/payment-settings:', err);
-    return c.json({ active_gateway: 'allpay', paddle_environment: 'sandbox' });
+    return c.json({ active_gateway: 'paddle', paddle_environment: 'sandbox' });
   }
 });
 
 /**
- * Admin API: Fetch full dynamic payment gateway settings (including API keys)
+ * Admin API: Fetch full dynamic payment settings
  * GET /api/admin/payment-settings
  */
 app.get('/api/admin/payment-settings', async (c) => {
@@ -801,67 +881,49 @@ app.get('/api/admin/payment-settings', async (c) => {
       .single();
 
     if (error) {
-      console.error('Error fetching admin payment settings:', error.message);
       return c.json({
-        active_gateway: 'allpay',
+        active_gateway: 'paddle',
         paddle_environment: 'sandbox',
         paddle_client_token: '',
         paddle_api_key: '',
         paddle_price_onetime: '',
         paddle_price_monthly: '',
-        paddle_price_yearly: '',
-        allpay_store_id: '',
-        allpay_secret_key: '',
-        allpay_product_onetime: '',
-        allpay_product_monthly: '',
-        allpay_product_yearly: ''
+        paddle_price_yearly: ''
       });
     }
 
     return c.json(settings);
   } catch (err: any) {
-    console.error('Admin payment settings fetch error:', err);
     return c.json({ error: err.message || 'Failed to fetch payment settings' }, 500);
   }
 });
 
 /**
- * Admin API: Update dynamic payment gateway settings
+ * Admin API: Update payment settings (Paddle MoR)
  * POST /api/admin/update-payment-settings
  */
 app.post('/api/admin/update-payment-settings', async (c) => {
   try {
     const body = await c.req.json();
     const {
-      active_gateway,
       paddle_environment,
       paddle_client_token,
       paddle_api_key,
       paddle_price_onetime,
       paddle_price_monthly,
-      paddle_price_yearly,
-      allpay_store_id,
-      allpay_secret_key,
-      allpay_product_onetime,
-      allpay_product_monthly,
-      allpay_product_yearly
+      paddle_price_yearly
     } = body;
 
     const supabase = getSupabaseClient(c.env);
     const payload = {
       id: 'global',
-      active_gateway: active_gateway || 'allpay',
+      active_gateway: 'paddle',
       paddle_environment: paddle_environment || 'sandbox',
       paddle_client_token: paddle_client_token ?? '',
       paddle_api_key: paddle_api_key ?? '',
       paddle_price_onetime: paddle_price_onetime ?? '',
       paddle_price_monthly: paddle_price_monthly ?? '',
       paddle_price_yearly: paddle_price_yearly ?? '',
-      allpay_store_id: allpay_store_id ?? '',
-      allpay_secret_key: allpay_secret_key ?? '',
-      allpay_product_onetime: allpay_product_onetime ?? '',
-      allpay_product_monthly: allpay_product_monthly ?? '',
-      allpay_product_yearly: allpay_product_yearly ?? '',
       updated_at: new Date().toISOString()
     };
 
@@ -872,13 +934,11 @@ app.post('/api/admin/update-payment-settings', async (c) => {
       .single();
 
     if (error) {
-      console.error('Supabase error updating payment_settings:', error);
       return c.json({ error: error.message || 'Database error updating payment settings' }, 500);
     }
 
     return c.json({ success: true, settings: updated });
   } catch (err: any) {
-    console.error('Server error updating payment settings:', err);
     return c.json({ error: err.message || 'Failed to update payment settings' }, 500);
   }
 });
@@ -901,7 +961,6 @@ app.post('/api/admin/update-pricing', async (c) => {
       updated_at: new Date().toISOString()
     };
 
-    // Update app_settings table
     const { data: updated, error } = await supabase
       .from('app_settings')
       .upsert(pricingPayload)
@@ -909,27 +968,11 @@ app.post('/api/admin/update-pricing', async (c) => {
       .single();
 
     if (error) {
-      console.error('Supabase error updating app_settings:', error);
-      // Fallback try pricing_plans table
-      const { data: pUpdated, error: pError } = await supabase
-        .from('pricing_plans')
-        .upsert(pricingPayload)
-        .select()
-        .single();
-      
-      if (pError) {
-        console.error('Supabase error updating pricing_plans fallback:', pError);
-        return c.json({ error: error.message || pError.message || 'Failed to update pricing in database' }, 500);
-      }
-      return c.json({ success: true, settings: pUpdated });
+      return c.json({ error: error.message || 'Failed to update pricing' }, 500);
     }
-
-    // Also update pricing_plans if it exists for sync
-    await supabase.from('pricing_plans').upsert(pricingPayload).catch(() => {});
 
     return c.json({ success: true, settings: updated });
   } catch (err: any) {
-    console.error('Server exception updating pricing:', err);
     return c.json({ error: err.message || 'Failed to update pricing on server' }, 500);
   }
 });

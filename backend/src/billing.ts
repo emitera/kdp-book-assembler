@@ -5,12 +5,12 @@ interface CheckoutParams {
   userId?: string;
   projectId?: string;
   type: 'subscription' | 'subscription_monthly' | 'subscription_yearly' | 'project_pass';
-  provider: 'paypal' | 'allpay' | 'paddle';
+  provider: 'paddle' | 'paypal';
   amount: number;
 }
 
 /**
- * Mocks or invokes the payment provider API to create a checkout link.
+ * Mocks or invokes the payment provider API to create a checkout link (Paddle MoR exclusive).
  */
 export async function createCheckoutSession(env: any, params: CheckoutParams) {
   const { provider, amount, type, userId, projectId, email } = params;
@@ -25,171 +25,73 @@ export async function createCheckoutSession(env: any, params: CheckoutParams) {
 
   const supabase = getSupabaseClient(env);
 
-  if (provider === 'paddle') {
-    // Paddle Billing Integration
-    try {
-      const { data: pSettings } = await supabase
-        .from('payment_settings')
-        .select('*')
-        .eq('id', 'global')
-        .single();
+  // Paddle Billing Integration (Merchant of Record)
+  try {
+    const { data: pSettings } = await supabase
+      .from('payment_settings')
+      .select('*')
+      .eq('id', 'global')
+      .single();
 
-      const isSandbox = pSettings?.paddle_environment === 'sandbox';
-      const paddleApiUrl = isSandbox 
-        ? 'https://sandbox-api.paddle.com' 
-        : 'https://api.paddle.com';
-      const apiKey = pSettings?.paddle_api_key;
+    const isSandbox = pSettings?.paddle_environment === 'sandbox';
+    const paddleApiUrl = isSandbox 
+      ? 'https://sandbox-api.paddle.com' 
+      : 'https://api.paddle.com';
+    const apiKey = pSettings?.paddle_api_key;
 
-      let priceId = pSettings?.paddle_price_onetime;
-      if (type === 'subscription_monthly' || type === 'subscription') {
-        priceId = pSettings?.paddle_price_monthly;
-      } else if (type === 'subscription_yearly') {
-        priceId = pSettings?.paddle_price_yearly;
-      }
-
-      if (apiKey && priceId) {
-        const txResponse = await fetch(`${paddleApiUrl}/transactions`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${apiKey}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            items: [{ price_id: priceId, quantity: 1 }],
-            customer_email: email,
-            custom_data: {
-              userId: userId || '',
-              projectId: projectId || '',
-              type: type,
-              email: email
-            },
-            checkout: {
-              success_url: `${env.FRONTEND_URL || 'https://birdypages.io'}?payment=success&projectId=${projectId || ''}`
-            }
-          })
-        });
-
-        if (txResponse.ok) {
-          const txData: any = await txResponse.json();
-          const checkoutUrl = txData.data?.checkout?.url;
-          if (checkoutUrl) {
-            return { checkoutUrl, transactionId: txData.data?.id };
-          }
-        }
-      }
-
-      // Fallback checkout simulation if keys aren't configured yet
-      const checkoutQuery = new URLSearchParams({
-        provider: 'paddle',
-        amount: amount.toString(),
-        type: type,
-        customId: customId
-      });
-      return {
-        checkoutUrl: `http://localhost:3000/api/simulate-payment?${checkoutQuery.toString()}`,
-        simulated: true
-      };
-    } catch (err: any) {
-      console.error('Paddle Checkout Error:', err);
-      return {
-        checkoutUrl: `http://localhost:3000/api/simulate-payment?provider=paddle&amount=${amount}&customId=${encodeURIComponent(customId)}`,
-        simulated: true
-      };
+    let priceId = pSettings?.paddle_price_onetime;
+    if (type === 'subscription_monthly' || type === 'subscription') {
+      priceId = pSettings?.paddle_price_monthly;
+    } else if (type === 'subscription_yearly') {
+      priceId = pSettings?.paddle_price_yearly;
     }
-  } else if (provider === 'paypal') {
-    // Standard PayPal integration: Retrieve Access Token
-    try {
-      const auth = btoa(`${env.PAYPAL_CLIENT_ID}:${env.PAYPAL_CLIENT_SECRET}`);
-      // Use sandbox or production URL
-      const isSandbox = !env.PAYPAL_LIVE_MODE || env.PAYPAL_LIVE_MODE === 'false';
-      const paypalUrl = isSandbox 
-        ? 'https://api-m.sandbox.paypal.com' 
-        : 'https://api-m.paypal.com';
 
-      const tokenResponse = await fetch(`${paypalUrl}/v1/oauth2/token`, {
+    if (apiKey && priceId) {
+      const txResponse = await fetch(`${paddleApiUrl}/transactions`, {
         method: 'POST',
         headers: {
-          'Authorization': `Basic ${auth}`,
-          'Content-Type': 'application/x-www-form-urlencoded'
-        },
-        body: 'grant_type=client_credentials'
-      });
-
-      if (!tokenResponse.ok) {
-        throw new Error('Failed to retrieve PayPal auth token');
-      }
-
-      const tokenData: any = await tokenResponse.json();
-      const accessToken = tokenData.access_token;
-
-      let packageDesc = `KDP Smart Assembler - Project Pass (${projectId})`;
-      if (type === 'subscription_monthly' || type === 'subscription') {
-        packageDesc = 'KDP Smart Assembler - 1 Month Unlimited Subscription';
-      } else if (type === 'subscription_yearly') {
-        packageDesc = 'KDP Smart Assembler - 1 Year Unlimited Subscription';
-      }
-
-      // Create Order
-      const orderResponse = await fetch(`${paypalUrl}/v2/checkout/orders`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
+          'Authorization': `Bearer ${apiKey}`,
           'Content-Type': 'application/json'
         },
         body: JSON.stringify({
-          intent: 'CAPTURE',
-          purchase_units: [{
-            amount: {
-              currency_code: 'USD',
-              value: amount.toFixed(2)
-            },
-            description: packageDesc,
-            custom_id: customId // Pass metadata through custom_id
-          }],
-          application_context: {
-            brand_name: 'KDP Smart Assembler',
-            user_action: 'PAY_NOW',
-            // Point redirects back to the front-end dashboard
-            return_url: `${env.FRONTEND_URL || 'http://localhost:5173'}?payment=success&projectId=${projectId || ''}`,
-            cancel_url: `${env.FRONTEND_URL || 'http://localhost:5173'}?payment=cancel`
+          items: [{ price_id: priceId, quantity: 1 }],
+          customer_email: email,
+          custom_data: {
+            userId: userId || '',
+            projectId: projectId || '',
+            type: type,
+            email: email
+          },
+          checkout: {
+            success_url: `${env.FRONTEND_URL || 'https://birdypages.io'}?payment=success&projectId=${projectId || ''}`
           }
         })
       });
 
-      if (!orderResponse.ok) {
-        const errText = await orderResponse.text();
-        throw new Error(`Failed to create PayPal order: ${errText}`);
+      if (txResponse.ok) {
+        const txData: any = await txResponse.json();
+        const checkoutUrl = txData.data?.checkout?.url;
+        if (checkoutUrl) {
+          return { checkoutUrl, transactionId: txData.data?.id };
+        }
       }
-
-      const orderData: any = await orderResponse.json();
-      const approveLink = orderData.links.find((l: any) => l.rel === 'approve');
-      
-      return {
-        checkoutUrl: approveLink ? approveLink.href : null,
-        orderId: orderData.id
-      };
-    } catch (err: any) {
-      console.error('PayPal Order Error:', err);
-      // Fallback: return a simulated URL for development if credentials are missing
-      return {
-        checkoutUrl: `http://localhost:3000/api/simulate-payment?provider=paypal&amount=${amount}&customId=${encodeURIComponent(customId)}`,
-        simulated: true
-      };
     }
-  } else {
-    // Allpay (ECPay) integration
-    // Required parameters to enforce 3D Secure / SCA validation on Card payments.
+
+    // Fallback checkout simulation if keys aren't configured yet
     const checkoutQuery = new URLSearchParams({
-      provider: 'allpay',
+      provider: 'paddle',
       amount: amount.toString(),
       type: type,
-      ThreeDVal: '1', // STRICT 3D SECURE ENFORCED
-      ScaVal: '1',    // Strong Customer Authentication
       customId: customId
     });
-
     return {
       checkoutUrl: `http://localhost:3000/api/simulate-payment?${checkoutQuery.toString()}`,
+      simulated: true
+    };
+  } catch (err: any) {
+    console.error('Paddle Checkout Error:', err);
+    return {
+      checkoutUrl: `http://localhost:3000/api/simulate-payment?provider=paddle&amount=${amount}&customId=${encodeURIComponent(customId)}`,
       simulated: true
     };
   }
@@ -197,106 +99,52 @@ export async function createCheckoutSession(env: any, params: CheckoutParams) {
 
 /**
  * Handles payment completion webhook notifications.
- * Records the transaction logs and activates paid roles in Supabase.
+ * Records transaction logs and activates paid roles in Supabase.
  */
-export async function handlePaymentWebhook(env: any, provider: 'paypal' | 'allpay' | 'paddle', data: any) {
+export async function handlePaymentWebhook(env: any, provider: 'paddle' | 'paypal', data: any) {
   const supabase = getSupabaseClient(env);
 
-  let transactionId = '';
-  let status = '';
+  let transactionId = data.id || `TX_${Date.now()}`;
+  let status = 'COMPLETED';
   let amount = 0;
   let customIdStr = '';
-  let eventType = '';
 
-  if (provider === 'paypal') {
-    eventType = data.event_type || '';
-    const resource = data.resource || {};
+  const eventType = data.event_type || data.alert_name || '';
 
-    if (eventType === 'PAYMENT.CAPTURE.COMPLETED') {
-      transactionId = resource.id;
-      status = resource.status; // 'COMPLETED'
-      amount = parseFloat(resource.amount?.value || '0');
-      customIdStr = resource.custom_id || '';
-    } else if (eventType === 'CHECKOUT.ORDER.APPROVED') {
-      transactionId = resource.id;
-      status = 'APPROVED';
-      amount = parseFloat(resource.purchase_units?.[0]?.amount?.value || '0');
-      customIdStr = resource.purchase_units?.[0]?.custom_id || '';
-    } else if (
-      eventType === 'BILLING.SUBSCRIPTION.CANCELLED' || 
-      eventType === 'BILLING.SUBSCRIPTION.EXPIRED' ||
-      eventType === 'BILLING.SUBSCRIPTION.PAYMENT-FAILED'
-    ) {
-      status = 'CANCELLED';
-      customIdStr = resource.custom_id || data.custom_id || '';
-      amount = 0;
-    } else {
-      // Ignored event types
-      return { status: 'ignored' };
-    }
-  } else {
-    // Allpay Webhook Parsing
-    transactionId = data.MerchantTradeNo || data.TradeNo;
-    const rtnCodeStr = String(data.RtnCode);
-    if (rtnCodeStr === '1') {
-      status = 'COMPLETED';
-    } else if (data.status === 'expired' || data.status === 'failed') {
-      status = 'FAILED';
-    } else {
-      status = 'FAILED';
-    }
-    amount = parseFloat(data.TradeAmt || '0');
-    customIdStr = data.CustomField1 || data.customId || ''; // Allpay custom parameters
+  if (eventType === 'transaction.completed' || eventType === 'subscription.created') {
+    status = 'COMPLETED';
+    const txData = data.data || data;
+    transactionId = txData.id || transactionId;
+    amount = parseFloat(txData.details?.totals?.total || '0') / 100 || 0;
+    customIdStr = JSON.stringify(txData.custom_data || {});
+  } else if (eventType === 'subscription.canceled' || eventType === 'subscription.past_due') {
+    status = 'CANCELLED';
+    const txData = data.data || data;
+    customIdStr = JSON.stringify(txData.custom_data || {});
   }
 
-  // Fallback webhook direct event status check (e.g. simulation/manual updates)
-  if (data.status === 'subscription_expired' || data.status === 'payment_failed') {
-    status = 'FAILED';
+  if (!customIdStr || customIdStr === '{}') {
+    return { status: 'acknowledged' };
   }
 
-  if (!customIdStr) {
-    // If we're updating by user ID directly in cancellation webhook
-    const rawUserId = data.userId || data.user_id;
-    if (rawUserId && (status === 'FAILED' || status === 'CANCELLED')) {
-      const { error: demoteErr } = await supabase
-        .from('profiles')
-        .update({
-          subscription_status: 'free',
-          subscription_expires_at: null
-        })
-        .eq('id', rawUserId);
-      if (demoteErr) {
-        throw new Error(`Failed to demote user on failed payment: ${demoteErr.message}`);
-      }
-      return { status: 'demoted', userId: rawUserId };
-    }
-    throw new Error('Missing transaction metadata (custom_id)');
-  }
+  try {
+    const metadata = JSON.parse(customIdStr);
+    const { userId, projectId, type, email } = metadata;
 
-  const metadata = JSON.parse(customIdStr);
-  const { userId, projectId, type, email } = metadata;
-
-  // 1. Log transaction into Payments table
-  const { error: logError } = await supabase
-    .from('payments')
-    .insert({
-      transaction_id: transactionId || `TX_${Date.now()}`,
+    // 1. Log transaction into payments table
+    await supabase.from('payments').insert({
+      transaction_id: transactionId,
       user_id: userId || null,
       project_id: projectId || null,
       email: email,
-      provider: provider,
+      provider: 'paddle',
       amount: amount,
       status: status
     });
 
-  if (logError) {
-    console.error('Failed to log payment transaction:', logError);
-  }
-
-  // 2. Deactivate features if payment failed, cancelled, or expired
-  if (status === 'FAILED' || status === 'CANCELLED') {
-    if (userId) {
-      const { error: demoteError } = await supabase
+    // 2. Deactivate if cancelled
+    if (status === 'CANCELLED' && userId) {
+      await supabase
         .from('profiles')
         .update({
           subscription_status: 'free',
@@ -304,52 +152,42 @@ export async function handlePaymentWebhook(env: any, provider: 'paypal' | 'allpa
         })
         .eq('id', userId);
 
-      if (demoteError) {
-        throw new Error(`Failed to demote user profile: ${demoteError.message}`);
+      return { status: 'deactivated', userId };
+    }
+
+    // 3. Activate features if completed
+    if (status === 'COMPLETED') {
+      if ((type === 'subscription' || type === 'subscription_monthly' || type === 'subscription_yearly') && userId) {
+        const expirationDate = new Date();
+        if (type === 'subscription_yearly') {
+          expirationDate.setDate(expirationDate.getDate() + 365);
+        } else {
+          expirationDate.setDate(expirationDate.getDate() + 30);
+        }
+
+        await supabase
+          .from('profiles')
+          .update({
+            subscription_status: type === 'subscription_yearly' ? 'yearly' : 'monthly',
+            subscription_expires_at: expirationDate.toISOString()
+          })
+          .eq('id', userId);
+      } else if (type === 'project_pass' && projectId) {
+        await supabase
+          .from('projects_passes')
+          .insert({
+            project_id: projectId,
+            user_id: userId || null,
+            email: email,
+            amount_paid: amount,
+            status: 'active'
+          });
       }
     }
-    return { status: 'deactivated', type, projectId, userId };
+
+    return { status: 'success', type, projectId, userId };
+  } catch (err: any) {
+    console.error('Webhook processing error:', err);
+    return { error: err.message };
   }
-
-  // 3. Activate features if transaction is completed successfully
-  if (status === 'COMPLETED' || status === 'APPROVED') {
-    if ((type === 'subscription' || type === 'subscription_monthly' || type === 'subscription_yearly') && userId) {
-      // Set expiration: 30 days or 365 days from now
-      const expirationDate = new Date();
-      if (type === 'subscription_yearly') {
-        expirationDate.setDate(expirationDate.getDate() + 365);
-      } else {
-        expirationDate.setDate(expirationDate.getDate() + 30);
-      }
-
-      const { error: subError } = await supabase
-        .from('profiles')
-        .update({
-          subscription_status: 'pro',
-          subscription_expires_at: expirationDate.toISOString()
-        })
-        .eq('id', userId);
-
-      if (subError) {
-        throw new Error(`Failed to activate subscription in profiles: ${subError.message}`);
-      }
-    } else if (type === 'project_pass' && projectId) {
-      // Insert/activate one-time license pass for this project
-      const { error: passError } = await supabase
-        .from('projects_passes')
-        .insert({
-          project_id: projectId,
-          user_id: userId || null,
-          email: email,
-          amount_paid: amount,
-          status: 'active'
-        });
-
-      if (passError) {
-        throw new Error(`Failed to save project pass: ${passError.message}`);
-      }
-    }
-  }
-
-  return { status: 'success', type, projectId, userId };
 }
