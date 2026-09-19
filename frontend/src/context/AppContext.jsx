@@ -33,18 +33,14 @@ export const AppProvider = ({ children }) => {
   const [monthlyProPriceUsd, setMonthlyProPriceUsd] = useState(19.99);
   const [yearlySubscriptionPriceUsd, setYearlySubscriptionPriceUsd] = useState(99.99);
 
-  // Dynamic Payment Gateway Settings
+  // Dynamic Payment Gateway Settings (Paddle Exclusive)
   const [paymentSettings, setPaymentSettings] = useState({
-    active_gateway: 'allpay',
+    active_gateway: 'paddle',
     paddle_environment: 'sandbox',
     paddle_client_token: '',
     paddle_price_onetime: '',
     paddle_price_monthly: '',
-    paddle_price_yearly: '',
-    allpay_store_id: '',
-    allpay_product_onetime: '',
-    allpay_product_monthly: '',
-    allpay_product_yearly: ''
+    paddle_price_yearly: ''
   });
 
   // Fetch pricing & payment settings dynamically on mount
@@ -499,7 +495,7 @@ export const AppProvider = ({ children }) => {
     // Payment Settings & Gateway
     paymentSettings,
     setPaymentSettings,
-    activeGateway: paymentSettings?.active_gateway || 'allpay',
+    activeGateway: paymentSettings?.active_gateway || 'paddle',
 
     // i18n & Currency
     language,

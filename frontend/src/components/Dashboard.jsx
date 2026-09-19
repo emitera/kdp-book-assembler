@@ -450,10 +450,10 @@ export default function Dashboard() {
                       PayPal
                     </button>
                     <button
-                      onClick={() => handleCheckoutTrigger(activeGateway || 'allpay')}
+                      onClick={() => handleCheckoutTrigger('paddle')}
                       className="py-3 px-4 bg-slate-900 dark:bg-slate-105 hover:bg-slate-800 dark:hover:bg-slate-200 text-white dark:text-slate-900 font-bold text-xs rounded-xl shadow-xs flex items-center justify-center gap-1.5 cursor-pointer transition-all"
                     >
-                      {activeGateway === 'paddle' ? 'Paddle (Карта)' : 'Банковская карта'}
+                      Карта / Paddle (Apple Pay, Google Pay)
                     </button>
                   </div>
                 </div>
