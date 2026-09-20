@@ -1,6 +1,6 @@
-# 🚀 Desktop Bridge: Upscaling & Flattening Roadmap (`desktop_bridge.md`)
+# 🚀 Desktop Bridge: Upscaling, Flattening & Licensing (`desktop_bridge.md`)
 
-[⬅ Back to Rendering Engine](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/rendering_engine.md) | [Master Index](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/master_index.md)
+[⬅ Back to Rendering Engine](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/rendering_engine.md) | [Master Index](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/master_index.md)
 
 ---
 
@@ -26,7 +26,7 @@ graph LR
 ---
 
 ## 4.2 Data Hooks & State Serialization Pipeline
-The desktop bridge intercepts the document state at the export trigger. The serialization schema passed to the Python worker is defined as:
+The desktop bridge intercepts document state at the export trigger. The JSON schema passed to the Python worker is defined as:
 
 ```json
 {
@@ -63,7 +63,7 @@ The desktop bridge intercepts the document state at the export trigger. The seri
 ---
 
 ## 4.3 Flattening Engine & Alpha Channel Stripping (RIP Safety)
-KDP print RIP (Raster Image Processor) engines frequently fail or generate transparency artifacts when processing semi-transparent PNGs, PDF transparency groups, or overlapping vector layers.
+KDP print RIP (Raster Image Processor) engines frequently fail or produce white box artifacts when handling semi-transparent PNGs, PDF transparency groups, or overlapping vector layers.
 
 ### Python Flattening Standard:
 ```python
@@ -112,11 +112,11 @@ sequenceDiagram
     actor User
     participant Flutter as Flutter Desktop App
     participant Storage as Local Encrypted Storage (Keychain / DPAPI)
-    participant Worker as Cloudflare Worker / Supabase API
+    participant Worker as Cloudflare Worker (/api/desktop/validate-license)
     participant DB as Supabase (desktop_licenses)
 
-    User->>Flutter: Enters License Key
-    Flutter->>Flutter: Computes Hardware ID (CPU ID + Motherboard UUID hash)
+    User->>Flutter: Enters License Key (BIRDY-XXXX-XXXX-XXXX)
+    Flutter->>Flutter: Computes Hardware ID (SHA-256 of CPU ID + Motherboard UUID)
     
     alt Internet Connected
         Flutter->>Worker: POST /api/desktop/validate-license { license_key, hardware_id }
@@ -125,10 +125,10 @@ sequenceDiagram
             DB-->>Worker: Status: Active, Expiry: null | Date
             Worker-->>Flutter: 200 OK + Signed JWT Token
             Flutter->>Storage: Store Encrypted Token (Cached Valid State)
-            Flutter->>User: App Unlocked (Pro / Lifetime)
+            Flutter->>User: App Unlocked (Desktop Pro)
         else Invalid / Bound to Another Device / Revoked
-            Worker-->>Flutter: 403 Forbidden { error: "INVALID_KEY" }
-            Flutter->>User: Show Error Dialog
+            Worker-->>Flutter: 403 Forbidden { error: "REVOKED" | "DEVICE_MISMATCH" }
+            Flutter->>User: Show Error & Lock Pro Features
         end
     else Offline Mode
         Flutter->>Storage: Read Encrypted Cached Token
@@ -143,3 +143,4 @@ sequenceDiagram
 ### Key Components:
 1. **Hardware ID Binding:** Generated deterministically on the client using SHA-256 hash of system identifiers (`MachineGUID` on Windows, `IOPlatformUUID` on macOS, `/etc/machine-id` on Linux).
 2. **Offline Resilience:** Once verified online, Flutter securely stores an encrypted JWT signature. The app permits fully offline operations (local AI upscaling, zero-crop PDF compilation) and re-verifies periodically in the background when connectivity is restored.
+3. **Instant Remote Revocation:** If a key is revoked in the Admin Panel or through a Paddle refund, the next server ping locks the application.

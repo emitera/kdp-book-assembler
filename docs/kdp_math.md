@@ -1,6 +1,6 @@
 # 📐 Core Business Logic & KDP Math Engine (`kdp_math.md`)
 
-[⬅ Back to Architecture](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/architecture.md) | [Master Index](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/master_index.md) | [Next: Rendering Engine ➡](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/rendering_engine.md)
+[⬅ Back to Architecture](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/architecture.md) | [Master Index](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/master_index.md) | [Next: Rendering Engine ➡](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/rendering_engine.md)
 
 ---
 

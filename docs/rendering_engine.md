@@ -1,6 +1,6 @@
 # 🎨 UI/UX Rendering Engine & Zero-Crop Policy (`rendering_engine.md`)
 
-[⬅ Back to KDP Math Engine](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/kdp_math.md) | [Master Index](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/master_index.md) | [Next: Desktop Bridge ➡](file:///C:/Users/evgen/.gemini/antigravity-ide/brain/04176191-ab30-4c85-8015-3e381afe907d/desktop_bridge.md)
+[⬅ Back to KDP Math Engine](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/kdp_math.md) | [Master Index](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/master_index.md) | [Next: Desktop Bridge ➡](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/desktop_bridge.md)
 
 ---
 
