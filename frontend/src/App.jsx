@@ -4,6 +4,7 @@ import Dashboard from './components/Dashboard'
 import AdminPanel from './components/AdminPanel'
 import SupportPage from './components/SupportPage'
 import DocViewer from './components/DocViewer'
+import { pingSupabaseKeepAlive } from './services/supabaseClient'
 
 function MainContent() {
   const [currentPath, setCurrentPath] = useState(window.location.pathname)
@@ -40,6 +41,10 @@ function MainContent() {
 }
 
 function App() {
+  useEffect(() => {
+    pingSupabaseKeepAlive();
+  }, []);
+
   return (
     <AppProvider>
       <MainContent />
