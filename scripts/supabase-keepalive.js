@@ -6,10 +6,11 @@
  * Run in GitHub Actions or any autonomous cron environment.
  */
 
-const SUPABASE_URL = (process.env.SUPABASE_URL || 'https://jezhiebjkbpuidabhvav.supabase.co').replace(/\/$/, '');
-const SUPABASE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY || 
-                     process.env.SUPABASE_ANON_KEY || 
-                     'sb_publishable_06RsSpB-EhaTncT7xgsCHA_5L7Prauz';
+const rawUrl = (process.env.SUPABASE_URL || '').trim();
+const SUPABASE_URL = (rawUrl || 'https://jezhiebjkbpuidabhvav.supabase.co').replace(/\/$/, '');
+
+const rawKey = (process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY || '').trim();
+const SUPABASE_KEY = rawKey || 'sb_publishable_06RsSpB-EhaTncT7xgsCHA_5L7Prauz';
 
 const PING_ID = 'birdy_ping';
 
