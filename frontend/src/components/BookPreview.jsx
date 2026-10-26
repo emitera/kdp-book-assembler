@@ -3,7 +3,27 @@ import HTMLFlipBook from 'react-pageflip';
 import { useApp } from '../context/AppContext';
 import { useTranslation } from 'react-i18next';
 import { calculateSpineWidth, calculateCoverDimensions, calculateInteriorDimensions } from '../utils/kdpMath';
-import { Eye, BookOpen, AlertTriangle, Layers, Book, Move, Sliders, Check, Lock, RotateCcw, ZoomIn, ZoomOut } from 'lucide-react';
+import { Eye, BookOpen, AlertTriangle, Layers, Book, Move, Sliders, Check, Lock, RotateCcw, ZoomIn, ZoomOut, Crop, Maximize2, Minimize2, Info, AlertCircle, X } from 'lucide-react';
+import LegendPanel from './LegendPanel';
+
+export const guideStyles = {
+  bleed: {
+    borderColor: '#ef4444',
+    filter: 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.95)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))'
+  },
+  safe: {
+    borderColor: '#6366f1',
+    filter: 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.95)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))'
+  },
+  gutter: {
+    borderColor: '#0284c7',
+    filter: 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.95)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))'
+  },
+  barcode: {
+    borderColor: '#f59e0b',
+    filter: 'drop-shadow(0 0 2px rgba(255, 255, 255, 0.95)) drop-shadow(0 0 1px rgba(0, 0, 0, 0.85))'
+  }
+};
 
 const InputField = ({ value, onChange, min, max, step }) => {
   const [localVal, setLocalVal] = useState(value);
@@ -116,14 +136,19 @@ const PreviewImage = ({
   containerHeight, 
   isDragging = false,
   isSelected = false,
-  onResizeStart = null
+  onResizeStart = null,
+  onAspectRatioLoaded = null
 }) => {
   const [aspectRatio, setAspectRatio] = useState(null);
 
   const handleImageLoad = (e) => {
     const { naturalWidth, naturalHeight } = e.target;
     if (naturalWidth && naturalHeight) {
-      setAspectRatio(naturalWidth / naturalHeight);
+      const ratio = naturalWidth / naturalHeight;
+      setAspectRatio(ratio);
+      if (onAspectRatioLoaded) {
+        onAspectRatioLoaded(ratio, naturalWidth, naturalHeight);
+      }
     }
   };
 
@@ -224,6 +249,24 @@ export default function BookPreview() {
   const [activeSpreadIndex, setActiveSpreadIndex] = useState(0);
   const [zoom, setZoom] = useState(1.0);
   const [workspaceWidth, setWorkspaceWidth] = useState(1040);
+
+  // High-contrast guides visibility & legend state
+  const [showGuides, setShowGuides] = useState(true);
+
+  // Aspect ratio detection map: [elementKey/pageId] -> { ratio, width, height }
+  const [imageAspectRatios, setImageAspectRatios] = useState({});
+
+  // Interactive Cover Crop Preview Mode state (Zero-Crop policy: transform only)
+  const [cropPreview, setCropPreview] = useState({
+    isActive: false,
+    elementKey: null, // 'full' | 'front' | 'back' | 'spine'
+    pageId: null,     // interior page id
+    coverScale: 1.0,
+    currentScale: 1.0,
+    xOffset: 0,
+    yOffset: 0,
+    originalTransform: null
+  });
 
   const workspaceRef = useRef(null);
   const flipBookRef = useRef(null);
@@ -464,16 +507,35 @@ export default function BookPreview() {
     return '';
   };
 
+  // Image aspect ratio loader callback
+  const handleAspectRatioLoaded = (keyOrPageId, ratio, width, height) => {
+    setImageAspectRatios(prev => {
+      if (prev[keyOrPageId]?.ratio === ratio) return prev;
+      return {
+        ...prev,
+        [keyOrPageId]: { ratio, width, height }
+      };
+    });
+  };
+
   // Drag and drop WYSIWYG core handler
   const handleDragStart = (e, elementKey, pageId = null) => {
     e.preventDefault();
     const startX = e.clientX;
     const startY = e.clientY;
 
+    const isCropPreviewThis = cropPreview.isActive && (
+      (pageId && cropPreview.pageId === pageId) ||
+      (!pageId && cropPreview.elementKey === elementKey)
+    );
+
     let initX = 0;
     let initY = 0;
 
-    if (pageId) {
+    if (isCropPreviewThis) {
+      initX = cropPreview.xOffset || 0;
+      initY = cropPreview.yOffset || 0;
+    } else if (pageId) {
       const pageObj = interiorPages.find(p => p.id === pageId);
       if (pageObj) {
         initX = pageObj.xOffset || 0;
@@ -531,7 +593,14 @@ export default function BookPreview() {
         element: elementKey || pageId
       });
 
-      if (pageId) {
+      if (isCropPreviewThis) {
+        // PREVIEW MODE: Only update local cropPreview state, do NOT touch AppContext
+        setCropPreview(prev => ({
+          ...prev,
+          xOffset: targetX,
+          yOffset: targetY
+        }));
+      } else if (pageId) {
         updatePageTransform(pageId, { xOffset: targetX, yOffset: targetY });
       } else {
         if (elementKey === 'front') {
@@ -670,6 +739,94 @@ export default function BookPreview() {
     );
   };
 
+  // Active asset and aspect ratio calculation helpers
+  const getActiveKey = () => {
+    if (activeTab === 'interior2d') return selectedPageId;
+    if (coverType === 'full') return 'full';
+    return selectedElement;
+  };
+
+  const activeKey = getActiveKey();
+  const activeImgInfo = imageAspectRatios[activeKey];
+  const containerRatio = baseW / baseH;
+  const imgRatio = activeImgInfo ? activeImgInfo.ratio : null;
+  const ratioDiff = imgRatio ? Math.abs(containerRatio - imgRatio) : 0;
+  const isRatioMismatch = ratioDiff > 0.01;
+  const calculatedCoverScale = imgRatio ? Math.max(containerRatio / imgRatio, imgRatio / containerRatio) : 1.0;
+
+  // Active asset fit mode
+  const activeFitMode = activeTransform.fitMode || (activeTransform.xScale > 1.05 ? 'cover' : 'contain');
+
+  // Mode 1: Contain
+  const handleSetContain = () => {
+    if (cropPreview.isActive) {
+      setCropPreview({ isActive: false, elementKey: null, pageId: null });
+    }
+    const updates = {
+      xScale: 1.0,
+      yScale: 1.0,
+      xOffset: 0,
+      yOffset: 0,
+      fitMode: 'contain'
+    };
+    if (activeTab === 'interior2d' && selectedPageId) {
+      updatePageTransform(selectedPageId, updates);
+    } else {
+      if (coverType === 'full') updateFullCoverTransform(updates);
+      else if (selectedElement === 'front') updateFrontCoverTransform(updates);
+      else if (selectedElement === 'back') updateBackCoverTransform(updates);
+      else if (selectedElement === 'spine') updateSpineImageTransform(updates);
+    }
+  };
+
+  // Mode 2: Cover Preview Activation (does NOT commit immediately)
+  const handleStartCoverPreview = () => {
+    setCropPreview({
+      isActive: true,
+      elementKey: activeTab === 'cover' ? (coverType === 'full' ? 'full' : selectedElement) : null,
+      pageId: activeTab === 'interior2d' ? selectedPageId : null,
+      coverScale: calculatedCoverScale,
+      currentScale: calculatedCoverScale,
+      xOffset: activeTransform.xOffset || 0,
+      yOffset: activeTransform.yOffset || 0,
+      originalTransform: {
+        xScale: activeTransform.xScale || 1.0,
+        yScale: activeTransform.yScale || 1.0,
+        xOffset: activeTransform.xOffset || 0,
+        yOffset: activeTransform.yOffset || 0,
+        fitMode: activeTransform.fitMode || 'contain'
+      }
+    });
+  };
+
+  // Apply previewed crop (commits transform to AppContext)
+  const handleApplyCrop = () => {
+    const updates = {
+      xScale: cropPreview.currentScale,
+      yScale: cropPreview.currentScale,
+      xOffset: cropPreview.xOffset,
+      yOffset: cropPreview.yOffset,
+      fitMode: 'cover'
+    };
+    if (cropPreview.pageId) {
+      updatePageTransform(cropPreview.pageId, updates);
+    } else if (cropPreview.elementKey === 'front') {
+      updateFrontCoverTransform(updates);
+    } else if (cropPreview.elementKey === 'back') {
+      updateBackCoverTransform(updates);
+    } else if (cropPreview.elementKey === 'spine') {
+      updateSpineImageTransform(updates);
+    } else if (cropPreview.elementKey === 'full') {
+      updateFullCoverTransform(updates);
+    }
+    setCropPreview({ isActive: false, elementKey: null, pageId: null });
+  };
+
+  // Cancel previewed crop (reverts to previous without saving)
+  const handleCancelCrop = () => {
+    setCropPreview({ isActive: false, elementKey: null, pageId: null });
+  };
+
   const handlePropChange = (key, value) => {
     const updates = { [key]: value };
     if (activeTab === 'interior2d' && selectedPageId) {
@@ -790,6 +947,47 @@ export default function BookPreview() {
           </button>
         )}
 
+        {/* Floating Legend Panel for High-Contrast Guide lines */}
+        <LegendPanel
+          showGuides={showGuides}
+          onToggleGuides={() => setShowGuides(prev => !prev)}
+          className="absolute top-4 right-4 z-30"
+        />
+
+        {/* Floating Cover Crop Preview Mode Bar */}
+        {cropPreview.isActive && (
+          <div className="absolute top-4 left-1/2 -translate-x-1/2 z-40 bg-slate-900/95 text-white px-4 py-2.5 rounded-2xl shadow-2xl border border-amber-500/60 backdrop-blur-md flex flex-wrap items-center justify-between gap-3 animate-in fade-in slide-in-from-top-2 max-w-xl">
+            <div className="flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse flex-shrink-0" />
+              <div className="text-left">
+                <div className="text-xs font-bold text-amber-300">
+                  {t('aspectRatio.previewActive', 'Режим превью: Заполнить (Cover)')}
+                </div>
+                <div className="text-[10px] text-slate-300 hidden sm:block">
+                  {t('aspectRatio.previewHint', 'Перетаскивайте изображение мышью, чтобы выбрать идеальную область кропа')}
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={handleApplyCrop}
+                type="button"
+                className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl shadow-md transition-all flex items-center gap-1.5 cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+                <span>{t('aspectRatio.applyBtn', 'Применить')}</span>
+              </button>
+              <button
+                onClick={handleCancelCrop}
+                type="button"
+                className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold rounded-xl transition-all cursor-pointer"
+              >
+                {t('aspectRatio.cancelBtn', 'Отмена')}
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Scrollable CAD-like Flex Workspace */}
         <div ref={workspaceRef} className="w-full overflow-x-auto p-6 bg-slate-50/50 dark:bg-slate-950/40 border border-slate-150 dark:border-slate-850 rounded-2xl flex justify-center">
           <div className="flex flex-row items-center gap-6 justify-center max-w-full">
@@ -801,309 +999,432 @@ export default function BookPreview() {
             {activeTab === 'cover' && (
               coverType === 'full' ? (
                 /* Full Cover layout */
-                <div
-                  className="relative border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl overflow-hidden shadow-lg transition-all max-w-full"
-                  style={{
-                    height: `${coverCanvasPxHeight}px`,
-                    width: `${coverCanvasPxWidth}px`
-                  }}
-                  ref={canvasRef}
-                >
-                  {/* Layer 1: Image Layer (Underneath guides) */}
-                  <div
-                    onMouseDown={(e) => {
-                      setSelectedElement('full');
-                      if (fullCover) handleDragStart(e, 'full');
-                    }}
-                    className={`absolute inset-0 cursor-pointer overflow-hidden transition-all ${
-                      selectedElement === 'full' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/40'
-                    }`}
-                  >
-                    {fullCover ? (
-                      <PreviewImage
-                        src={fullCover.preview}
-                        xScale={fullCover.xScale}
-                        yScale={fullCover.yScale}
-                        xOffset={fullCover.xOffset}
-                        yOffset={fullCover.yOffset}
-                        containerWidth={coverCanvasPxWidth}
-                        containerHeight={coverCanvasPxHeight}
-                        isDragging={dragState.isDragging && selectedElement === 'full'}
-                        isSelected={selectedElement === 'full'}
-                        onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'full')}
-                      />
-                    ) : (
-                      <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center text-slate-400">
-                        <BookOpen className="w-12 h-12 mb-2 opacity-35" />
-                        <span className="text-[10px] font-bold uppercase">Загрузите полный разворот обложки</span>
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Layer 2: Guides Layer (Fixed to Canvas, pointer-events-none, never scales with image) */}
-                  <div className="absolute inset-0 pointer-events-none z-20">
-                    {/* Spine boundary guides */}
+                (() => {
+                  const isCropPreviewFull = cropPreview.isActive && cropPreview.elementKey === 'full';
+                  return (
                     <div
-                      className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 border-l border-r border-dashed border-indigo-500/40 bg-indigo-50/5"
-                      style={{ width: `${spinePxWidth}px` }}
-                    />
-
-                    {/* Hardcover channels and wrap zones */}
-                    {bindingType === 'hardcover' ? (
-                      <>
-                        {/* Wrap areas (0.591" = 15mm from all 4 outer edges) */}
-                        <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 left-0 bg-red-500/5 border-r border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-                        <div className="absolute top-0 bottom-0 right-0 bg-red-500/5 border-l border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-
-                        {/* Hinge channels (0.394" = 10mm flanking spine) */}
-                        <div className="absolute top-0 bottom-0 bg-blue-500/5 border-l border-r border-dashed border-blue-500/50" style={{
-                          left: `${(0.591 + activeTrimSize.width) * pxPerInchCover}px`,
-                          width: `${0.394 * pxPerInchCover}px`
-                        }} />
-                        <div className="absolute top-0 bottom-0 bg-blue-500/5 border-l border-r border-dashed border-blue-500/50" style={{
-                          left: `${(0.591 + activeTrimSize.width + 0.394 + spineWidth) * pxPerInchCover}px`,
-                          width: `${0.394 * pxPerInchCover}px`
-                        }} />
-                      </>
-                    ) : (
-                      <>
-                        {/* Paperback Bleed / Trim lines (0.125" from canvas edge) */}
-                        {hasBleed && (
-                          <div
-                            className="absolute border border-dashed border-red-500/50"
-                            style={{
-                              top: `${0.125 * pxPerInchCover}px`,
-                              bottom: `${0.125 * pxPerInchCover}px`,
-                              left: `${0.125 * pxPerInchCover}px`,
-                              right: `${0.125 * pxPerInchCover}px`
-                            }}
+                      className={`relative border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl shadow-lg transition-all max-w-full ${
+                        isCropPreviewFull ? 'overflow-visible z-25 ring-2 ring-amber-400' : 'overflow-hidden'
+                      }`}
+                      style={{
+                        height: `${coverCanvasPxHeight}px`,
+                        width: `${coverCanvasPxWidth}px`
+                      }}
+                      ref={canvasRef}
+                    >
+                      {/* Layer 1: Image Layer (Underneath guides) */}
+                      <div
+                        onMouseDown={(e) => {
+                          setSelectedElement('full');
+                          if (fullCover) handleDragStart(e, 'full');
+                        }}
+                        className={`absolute inset-0 cursor-pointer transition-all ${
+                          isCropPreviewFull ? 'overflow-visible z-25' : 'overflow-hidden'
+                        } ${
+                          selectedElement === 'full' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/40'
+                        }`}
+                      >
+                        {fullCover ? (
+                          <PreviewImage
+                            src={fullCover.preview}
+                            xScale={isCropPreviewFull ? cropPreview.currentScale : fullCover.xScale}
+                            yScale={isCropPreviewFull ? cropPreview.currentScale : fullCover.yScale}
+                            xOffset={isCropPreviewFull ? cropPreview.xOffset : fullCover.xOffset}
+                            yOffset={isCropPreviewFull ? cropPreview.yOffset : fullCover.yOffset}
+                            containerWidth={coverCanvasPxWidth}
+                            containerHeight={coverCanvasPxHeight}
+                            isDragging={dragState.isDragging && (selectedElement === 'full' || isCropPreviewFull)}
+                            isSelected={selectedElement === 'full' && !isCropPreviewFull}
+                            onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'full')}
+                            onAspectRatioLoaded={(r, w, h) => handleAspectRatioLoaded('full', r, w, h)}
                           />
+                        ) : (
+                          <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center text-slate-400">
+                            <BookOpen className="w-12 h-12 mb-2 opacity-35" />
+                            <span className="text-[10px] font-bold uppercase">Загрузите полный разворот обложки</span>
+                          </div>
                         )}
-                        {/* Safe Margins (0.25" inside trim) */}
-                        <div
-                          className="absolute border border-dashed border-indigo-500/30"
-                          style={{
-                            top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`
-                          }}
-                        />
-                      </>
-                    )}
+                      </div>
 
-                    {renderSmartGuides('full')}
-                  </div>
-                </div>
+                      {/* Semi-transparent Crop Trim Overlay for Preview Mode */}
+                      {isCropPreviewFull && (
+                        <div className="absolute inset-0 pointer-events-none z-30 border-2 border-dashed border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]">
+                          <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded shadow flex items-center gap-1">
+                            <Crop className="w-3 h-3" />
+                            <span>{t('aspectRatio.cropOverlayLabel', 'Зона сохранения (Trim)')}</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Layer 2: Guides Layer (Fixed to Canvas, pointer-events-none, never scales with image) */}
+                      {showGuides && (
+                        <div className="absolute inset-0 pointer-events-none z-20">
+                          {/* Spine boundary guides (Gutter) */}
+                          <div
+                            className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 border-l-2 border-r-2 border-dashed border-sky-600 bg-sky-50/5"
+                            style={{ width: `${spinePxWidth}px`, ...guideStyles.gutter }}
+                          />
+
+                          {/* Hardcover channels and wrap zones */}
+                          {bindingType === 'hardcover' ? (
+                            <>
+                              {/* Wrap areas (0.591" = 15mm from all 4 outer edges) */}
+                              <div className="absolute top-0 left-0 right-0 border-b-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                              <div className="absolute bottom-0 left-0 right-0 border-t-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                              <div className="absolute top-0 bottom-0 left-0 border-r-2 border-dashed border-red-500" style={{ width: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                              <div className="absolute top-0 bottom-0 right-0 border-l-2 border-dashed border-red-500" style={{ width: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+
+                              {/* Hinge channels (0.394" = 10mm flanking spine) */}
+                              <div className="absolute top-0 bottom-0 border-l-2 border-r-2 border-dashed border-sky-600" style={{
+                                left: `${(0.591 + activeTrimSize.width) * pxPerInchCover}px`,
+                                width: `${0.394 * pxPerInchCover}px`,
+                                ...guideStyles.gutter
+                              }} />
+                              <div className="absolute top-0 bottom-0 border-l-2 border-r-2 border-dashed border-sky-600" style={{
+                                left: `${(0.591 + activeTrimSize.width + 0.394 + spineWidth) * pxPerInchCover}px`,
+                                width: `${0.394 * pxPerInchCover}px`,
+                                ...guideStyles.gutter
+                              }} />
+                            </>
+                          ) : (
+                            <>
+                              {/* Paperback Bleed / Trim lines (0.125" from canvas edge) */}
+                              {hasBleed && (
+                                <div
+                                  className="absolute border-2 border-dashed border-red-500"
+                                  style={{
+                                    top: `${0.125 * pxPerInchCover}px`,
+                                    bottom: `${0.125 * pxPerInchCover}px`,
+                                    left: `${0.125 * pxPerInchCover}px`,
+                                    right: `${0.125 * pxPerInchCover}px`,
+                                    ...guideStyles.bleed
+                                  }}
+                                />
+                              )}
+                              {/* Safe Margins (0.25" inside trim) */}
+                              <div
+                                className="absolute border-2 border-dashed border-indigo-500"
+                                style={{
+                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  ...guideStyles.safe
+                                }}
+                              />
+                            </>
+                          )}
+
+                          {/* Barcode Guide Zone on Back Cover */}
+                          <div
+                            className="absolute border-2 border-dashed border-amber-500 bg-amber-400/10 flex flex-col items-center justify-center pointer-events-none rounded-sm"
+                            style={{
+                              width: `${2.0 * pxPerInchCover}px`,
+                              height: `${1.2 * pxPerInchCover}px`,
+                              left: `${(bindingType === 'hardcover' ? (0.591 + activeTrimSize.width - 2.0 - 0.25) : (activeTrimSize.width - 2.0 - 0.25 + (hasBleed ? 0.125 : 0))) * pxPerInchCover}px`,
+                              bottom: `${(bindingType === 'hardcover' ? (0.591 + 0.25) : (0.25 + (hasBleed ? 0.125 : 0))) * pxPerInchCover}px`,
+                              ...guideStyles.barcode
+                            }}
+                          >
+                            <span className="text-[8px] font-extrabold uppercase tracking-tight text-amber-500 drop-shadow">
+                              KDP Barcode
+                            </span>
+                            <span className="text-[7px] text-amber-500/90 font-mono">
+                              2.0" × 1.2"
+                            </span>
+                          </div>
+
+                          {renderSmartGuides('full')}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })()
               ) : (
                 /* Parts Layout: Back, Spine, Front Cover */
-                <div 
-                  className="relative flex border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl overflow-hidden shadow-lg transition-all max-w-full"
-                  style={{ 
-                    width: `${coverCanvasPxWidth}px`,
-                    height: `${coverCanvasPxHeight}px` 
-                  }}
-                  ref={canvasRef}
-                >
-                  {/* Back Cover Block */}
-                  <div 
-                    onMouseDown={(e) => {
-                      setSelectedElement('back');
-                      if (backCover) handleDragStart(e, 'back');
-                    }}
-                    className={`relative h-full flex items-center justify-center border-r border-dashed border-slate-350 dark:border-slate-800 cursor-pointer overflow-hidden transition-all ${
-                      selectedElement === 'back' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
-                    }`}
-                    style={{ width: `${coverPagePxWidth}px` }}
-                  >
-                    {/* Image Layer */}
-                    {backCover ? (
-                      <PreviewImage
-                        src={backCover.preview}
-                        xScale={backCover.xScale}
-                        yScale={backCover.yScale}
-                        xOffset={backCover.xOffset}
-                        yOffset={backCover.yOffset}
-                        containerWidth={coverPagePxWidth}
-                        containerHeight={coverCanvasPxHeight}
-                        isDragging={dragState.isDragging && selectedElement === 'back'}
-                        isSelected={selectedElement === 'back'}
-                        onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'back')}
-                      />
-                    ) : (
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Задняя часть</span>
-                    )}
+                (() => {
+                  const isCropPreviewBack = cropPreview.isActive && cropPreview.elementKey === 'back';
+                  const isCropPreviewSpine = cropPreview.isActive && cropPreview.elementKey === 'spine';
+                  const isCropPreviewFront = cropPreview.isActive && cropPreview.elementKey === 'front';
+                  const isAnyPartsCrop = isCropPreviewBack || isCropPreviewSpine || isCropPreviewFront;
 
-                    {/* Guides Layer for Back Cover (Fixed to Back Container) */}
-                    <div className="absolute inset-0 pointer-events-none z-20">
-                      {bindingType === 'hardcover' ? (
-                        <>
-                          <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute top-0 bottom-0 left-0 bg-red-500/5 border-r border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute top-0 bottom-0 right-0 bg-blue-500/5 border-l border-dashed border-blue-500/50" style={{ width: `${0.394 * pxPerInchCover}px` }} />
-                          <div className="absolute border border-dashed border-indigo-500/30" style={{
-                            top: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                            bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                            left: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                            right: `${(0.394 + 0.375) * pxPerInchCover}px`
-                          }} />
-                        </>
-                      ) : (
-                        <>
-                          {hasBleed && (
-                            <div className="absolute border-t border-b border-l border-dashed border-red-500/50" style={{
-                              top: `${0.125 * pxPerInchCover}px`,
-                              bottom: `${0.125 * pxPerInchCover}px`,
-                              left: `${0.125 * pxPerInchCover}px`,
-                              right: 0
-                            }} />
-                          )}
-                          <div className="absolute border border-dashed border-indigo-500/30" style={{
-                            top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            right: `${0.25 * pxPerInchCover}px`
-                          }} />
-                        </>
-                      )}
-                      {renderSmartGuides('back')}
-                    </div>
-                  </div>
+                  return (
+                    <div 
+                      className={`relative flex border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 rounded-xl shadow-lg transition-all max-w-full ${
+                        isAnyPartsCrop ? 'overflow-visible z-25' : 'overflow-hidden'
+                      }`}
+                      style={{ 
+                        width: `${coverCanvasPxWidth}px`,
+                        height: `${coverCanvasPxHeight}px` 
+                      }}
+                      ref={canvasRef}
+                    >
+                      {/* Back Cover Block */}
+                      <div 
+                        onMouseDown={(e) => {
+                          setSelectedElement('back');
+                          if (backCover) handleDragStart(e, 'back');
+                        }}
+                        className={`relative h-full flex items-center justify-center border-r border-dashed border-slate-350 dark:border-slate-800 cursor-pointer transition-all ${
+                          isCropPreviewBack ? 'overflow-visible z-25 ring-2 ring-amber-400' : 'overflow-hidden'
+                        } ${
+                          selectedElement === 'back' && !isCropPreviewBack ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
+                        }`}
+                        style={{ width: `${coverPagePxWidth}px` }}
+                      >
+                        {/* Image Layer */}
+                        {backCover ? (
+                          <PreviewImage
+                            src={backCover.preview}
+                            xScale={isCropPreviewBack ? cropPreview.currentScale : backCover.xScale}
+                            yScale={isCropPreviewBack ? cropPreview.currentScale : backCover.yScale}
+                            xOffset={isCropPreviewBack ? cropPreview.xOffset : backCover.xOffset}
+                            yOffset={isCropPreviewBack ? cropPreview.yOffset : backCover.yOffset}
+                            containerWidth={coverPagePxWidth}
+                            containerHeight={coverCanvasPxHeight}
+                            isDragging={dragState.isDragging && (selectedElement === 'back' || isCropPreviewBack)}
+                            isSelected={selectedElement === 'back' && !isCropPreviewBack}
+                            onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'back')}
+                            onAspectRatioLoaded={(r, w, h) => handleAspectRatioLoaded('back', r, w, h)}
+                          />
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Задняя часть</span>
+                        )}
 
-                  {/* Dynamic Spine Block */}
-                  <div
-                    onMouseDown={(e) => {
-                      setSelectedElement('spine');
-                      if (spineImage && pageCount >= 79) handleDragStart(e, 'spine');
-                    }}
-                    className={`relative h-full flex items-center justify-center overflow-hidden cursor-pointer ${
-                      selectedElement === 'spine' ? 'ring-2 ring-indigo-500 ring-inset' : ''
-                    }`}
-                    style={{
-                      backgroundColor: spineColor,
-                      width: `${spinePxWidth}px`
-                    }}
-                  >
-                    {/* Image / Text Layer */}
-                    {spineImage && pageCount >= 79 ? (
-                      <PreviewImage
-                        src={spineImage.preview}
-                        xScale={spineImage.xScale}
-                        yScale={spineImage.yScale}
-                        xOffset={spineImage.xOffset}
-                        yOffset={spineImage.yOffset}
-                        containerWidth={spinePxWidth}
-                        containerHeight={coverCanvasPxHeight}
-                        isDragging={dragState.isDragging && selectedElement === 'spine'}
-                        isSelected={selectedElement === 'spine'}
-                        onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'spine')}
-                      />
-                    ) : spineText && pageCount >= 79 ? (
-                      <span
-                        className="whitespace-nowrap font-bold uppercase tracking-widest select-none pointer-events-none z-5"
+                        {/* Crop Overlay for Back Cover */}
+                        {isCropPreviewBack && (
+                          <div className="absolute inset-0 pointer-events-none z-30 border-2 border-dashed border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]">
+                            <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded shadow flex items-center gap-1">
+                              <Crop className="w-3 h-3" />
+                              <span>{t('aspectRatio.cropOverlayLabel', 'Зона сохранения (Trim)')}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Guides Layer for Back Cover */}
+                        {showGuides && (
+                          <div className="absolute inset-0 pointer-events-none z-20">
+                            {bindingType === 'hardcover' ? (
+                              <>
+                                <div className="absolute top-0 left-0 right-0 border-b-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute bottom-0 left-0 right-0 border-t-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute top-0 bottom-0 left-0 border-r-2 border-dashed border-red-500" style={{ width: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute top-0 bottom-0 right-0 border-l-2 border-dashed border-sky-600" style={{ width: `${0.394 * pxPerInchCover}px`, ...guideStyles.gutter }} />
+                                <div className="absolute border-2 border-dashed border-indigo-500" style={{
+                                  top: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                                  bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                                  left: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                                  right: `${(0.394 + 0.375) * pxPerInchCover}px`,
+                                  ...guideStyles.safe
+                                }} />
+                              </>
+                            ) : (
+                              <>
+                                {hasBleed && (
+                                  <div className="absolute border-t-2 border-b-2 border-l-2 border-dashed border-red-500" style={{
+                                    top: `${0.125 * pxPerInchCover}px`,
+                                    bottom: `${0.125 * pxPerInchCover}px`,
+                                    left: `${0.125 * pxPerInchCover}px`,
+                                    right: 0,
+                                    ...guideStyles.bleed
+                                  }} />
+                                )}
+                                <div className="absolute border-2 border-dashed border-indigo-500" style={{
+                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  right: `${0.25 * pxPerInchCover}px`,
+                                  ...guideStyles.safe
+                                }} />
+                              </>
+                            )}
+
+                            {/* Barcode Guide Zone on Back Cover (Parts) */}
+                            <div
+                              className="absolute border-2 border-dashed border-amber-500 bg-amber-400/10 flex flex-col items-center justify-center pointer-events-none rounded-sm"
+                              style={{
+                                width: `${2.0 * pxPerInchCover}px`,
+                                height: `${1.2 * pxPerInchCover}px`,
+                                right: `${(bindingType === 'hardcover' ? (0.394 + 0.25) : (0.25 + (hasBleed ? 0.125 : 0))) * pxPerInchCover}px`,
+                                bottom: `${(bindingType === 'hardcover' ? (0.591 + 0.25) : (0.25 + (hasBleed ? 0.125 : 0))) * pxPerInchCover}px`,
+                                ...guideStyles.barcode
+                              }}
+                            >
+                              <span className="text-[8px] font-extrabold uppercase tracking-tight text-amber-500 drop-shadow">
+                                KDP Barcode
+                              </span>
+                              <span className="text-[7px] text-amber-500/90 font-mono">
+                                2.0" × 1.2"
+                              </span>
+                            </div>
+
+                            {renderSmartGuides('back')}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Dynamic Spine Block */}
+                      <div
+                        onMouseDown={(e) => {
+                          setSelectedElement('spine');
+                          if (spineImage && pageCount >= 79) handleDragStart(e, 'spine');
+                        }}
+                        className={`relative h-full flex items-center justify-center cursor-pointer transition-all ${
+                          isCropPreviewSpine ? 'overflow-visible z-25 ring-2 ring-amber-400' : 'overflow-hidden'
+                        } ${
+                          selectedElement === 'spine' && !isCropPreviewSpine ? 'ring-2 ring-indigo-500 ring-inset' : ''
+                        }`}
                         style={{
-                          color: spineTextColor,
-                          transform: `rotate(${spineTextDirection === 'bottom-to-top' ? -90 : 90}deg)`,
-                          fontSize: `${Math.min(12, Math.max(4, (spineWidth - 0.125) * pxPerInchCover))}px`
+                          backgroundColor: spineColor,
+                          width: `${spinePxWidth}px`
                         }}
                       >
-                        {spineText}
-                      </span>
-                    ) : null}
-
-                    {/* Guides Layer for Spine */}
-                    <div className="absolute inset-0 pointer-events-none z-20">
-                      {bindingType === 'hardcover' ? (
-                        <>
-                          <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                        </>
-                      ) : (
-                        selectedElement === 'spine' && (
-                          <div
-                            className="absolute border border-dashed border-red-500/60"
-                            style={{
-                              left: `${0.0625 * pxPerInchCover}px`,
-                              right: `${0.0625 * pxPerInchCover}px`,
-                              top: `${0.25 * pxPerInchCover}px`,
-                              bottom: `${0.25 * pxPerInchCover}px`
-                            }}
+                        {/* Image / Text Layer */}
+                        {spineImage && pageCount >= 79 ? (
+                          <PreviewImage
+                            src={spineImage.preview}
+                            xScale={isCropPreviewSpine ? cropPreview.currentScale : spineImage.xScale}
+                            yScale={isCropPreviewSpine ? cropPreview.currentScale : spineImage.yScale}
+                            xOffset={isCropPreviewSpine ? cropPreview.xOffset : spineImage.xOffset}
+                            yOffset={isCropPreviewSpine ? cropPreview.yOffset : spineImage.yOffset}
+                            containerWidth={spinePxWidth}
+                            containerHeight={coverCanvasPxHeight}
+                            isDragging={dragState.isDragging && (selectedElement === 'spine' || isCropPreviewSpine)}
+                            isSelected={selectedElement === 'spine' && !isCropPreviewSpine}
+                            onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'spine')}
+                            onAspectRatioLoaded={(r, w, h) => handleAspectRatioLoaded('spine', r, w, h)}
                           />
-                        )
-                      )}
-                      {renderSmartGuides('spine')}
-                    </div>
-                  </div>
+                        ) : spineText && pageCount >= 79 ? (
+                          <span
+                            className="whitespace-nowrap font-bold uppercase tracking-widest select-none pointer-events-none z-5"
+                            style={{
+                              color: spineTextColor,
+                              transform: `rotate(${spineTextDirection === 'bottom-to-top' ? -90 : 90}deg)`,
+                              fontSize: `${Math.min(12, Math.max(4, (spineWidth - 0.125) * pxPerInchCover))}px`
+                            }}
+                          >
+                            {spineText}
+                          </span>
+                        ) : null}
 
-                  {/* Front Cover Block */}
-                  <div 
-                    onMouseDown={(e) => {
-                      setSelectedElement('front');
-                      if (frontCover) handleDragStart(e, 'front');
-                    }}
-                    className={`relative h-full flex items-center justify-center cursor-pointer overflow-hidden transition-all ${
-                      selectedElement === 'front' ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
-                    }`}
-                    style={{ width: `${coverPagePxWidth}px` }}
-                  >
-                    {/* Image Layer */}
-                    {frontCover ? (
-                      <PreviewImage
-                        src={frontCover.preview}
-                        xScale={frontCover.xScale}
-                        yScale={frontCover.yScale}
-                        xOffset={frontCover.xOffset}
-                        yOffset={frontCover.yOffset}
-                        containerWidth={coverPagePxWidth}
-                        containerHeight={coverCanvasPxHeight}
-                        isDragging={dragState.isDragging && selectedElement === 'front'}
-                        isSelected={selectedElement === 'front'}
-                        onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'front')}
-                      />
-                    ) : (
-                      <span className="text-[10px] font-bold text-slate-400 uppercase">Передняя часть</span>
-                    )}
+                        {/* Crop Overlay for Spine */}
+                        {isCropPreviewSpine && (
+                          <div className="absolute inset-0 pointer-events-none z-30 border-2 border-dashed border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]" />
+                        )}
 
-                    {/* Guides Layer for Front Cover */}
-                    <div className="absolute inset-0 pointer-events-none z-20">
-                      {bindingType === 'hardcover' ? (
-                        <>
-                          <div className="absolute top-0 left-0 right-0 bg-red-500/5 border-b border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute bottom-0 left-0 right-0 bg-red-500/5 border-t border-dashed border-red-500/50" style={{ height: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute top-0 bottom-0 right-0 bg-red-500/5 border-l border-dashed border-red-500/50" style={{ width: `${0.591 * pxPerInchCover}px` }} />
-                          <div className="absolute top-0 bottom-0 left-0 bg-blue-500/5 border-r border-dashed border-blue-500/50" style={{ width: `${0.394 * pxPerInchCover}px` }} />
-                          <div className="absolute border border-dashed border-indigo-500/30" style={{
-                            top: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                            bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                            right: `${(0.591 + 0.375) * pxPerInchCover}px`,
-                            left: `${(0.394 + 0.375) * pxPerInchCover}px`
-                          }} />
-                        </>
-                      ) : (
-                        <>
-                          {hasBleed && (
-                            <div className="absolute border-t border-b border-r border-dashed border-red-500/50" style={{
-                              top: `${0.125 * pxPerInchCover}px`,
-                              bottom: `${0.125 * pxPerInchCover}px`,
-                              right: `${0.125 * pxPerInchCover}px`,
-                              left: 0
-                            }} />
-                          )}
-                          <div className="absolute border border-dashed border-indigo-500/30" style={{
-                            top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
-                            left: `${0.25 * pxPerInchCover}px`
-                          }} />
-                        </>
-                      )}
-                      {renderSmartGuides('front')}
+                        {/* Guides Layer for Spine */}
+                        {showGuides && (
+                          <div className="absolute inset-0 pointer-events-none z-20">
+                            {bindingType === 'hardcover' ? (
+                              <>
+                                <div className="absolute top-0 left-0 right-0 border-b-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute bottom-0 left-0 right-0 border-t-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                              </>
+                            ) : (
+                              selectedElement === 'spine' && (
+                                <div
+                                  className="absolute border-2 border-dashed border-red-500"
+                                  style={{
+                                    left: `${0.0625 * pxPerInchCover}px`,
+                                    right: `${0.0625 * pxPerInchCover}px`,
+                                    top: `${0.25 * pxPerInchCover}px`,
+                                    bottom: `${0.25 * pxPerInchCover}px`,
+                                    ...guideStyles.bleed
+                                  }}
+                                />
+                              )
+                            )}
+                            {renderSmartGuides('spine')}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Front Cover Block */}
+                      <div 
+                        onMouseDown={(e) => {
+                          setSelectedElement('front');
+                          if (frontCover) handleDragStart(e, 'front');
+                        }}
+                        className={`relative h-full flex items-center justify-center cursor-pointer transition-all ${
+                          isCropPreviewFront ? 'overflow-visible z-25 ring-2 ring-amber-400' : 'overflow-hidden'
+                        } ${
+                          selectedElement === 'front' && !isCropPreviewFront ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
+                        }`}
+                        style={{ width: `${coverPagePxWidth}px` }}
+                      >
+                        {/* Image Layer */}
+                        {frontCover ? (
+                          <PreviewImage
+                            src={frontCover.preview}
+                            xScale={isCropPreviewFront ? cropPreview.currentScale : frontCover.xScale}
+                            yScale={isCropPreviewFront ? cropPreview.currentScale : frontCover.yScale}
+                            xOffset={isCropPreviewFront ? cropPreview.xOffset : frontCover.xOffset}
+                            yOffset={isCropPreviewFront ? cropPreview.yOffset : frontCover.yOffset}
+                            containerWidth={coverPagePxWidth}
+                            containerHeight={coverCanvasPxHeight}
+                            isDragging={dragState.isDragging && (selectedElement === 'front' || isCropPreviewFront)}
+                            isSelected={selectedElement === 'front' && !isCropPreviewFront}
+                            onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, 'front')}
+                            onAspectRatioLoaded={(r, w, h) => handleAspectRatioLoaded('front', r, w, h)}
+                          />
+                        ) : (
+                          <span className="text-[10px] font-bold text-slate-400 uppercase">Передняя часть</span>
+                        )}
+
+                        {/* Crop Overlay for Front Cover */}
+                        {isCropPreviewFront && (
+                          <div className="absolute inset-0 pointer-events-none z-30 border-2 border-dashed border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]">
+                            <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded shadow flex items-center gap-1">
+                              <Crop className="w-3 h-3" />
+                              <span>{t('aspectRatio.cropOverlayLabel', 'Зона сохранения (Trim)')}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        {/* Guides Layer for Front Cover */}
+                        {showGuides && (
+                          <div className="absolute inset-0 pointer-events-none z-20">
+                            {bindingType === 'hardcover' ? (
+                              <>
+                                <div className="absolute top-0 left-0 right-0 border-b-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute bottom-0 left-0 right-0 border-t-2 border-dashed border-red-500" style={{ height: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute top-0 bottom-0 right-0 border-l-2 border-dashed border-red-500" style={{ width: `${0.591 * pxPerInchCover}px`, ...guideStyles.bleed }} />
+                                <div className="absolute top-0 bottom-0 left-0 border-r-2 border-dashed border-sky-600" style={{ width: `${0.394 * pxPerInchCover}px`, ...guideStyles.gutter }} />
+                                <div className="absolute border-2 border-dashed border-indigo-500" style={{
+                                  top: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                                  bottom: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                                  right: `${(0.591 + 0.375) * pxPerInchCover}px`,
+                                  left: `${(0.394 + 0.375) * pxPerInchCover}px`,
+                                  ...guideStyles.safe
+                                }} />
+                              </>
+                            ) : (
+                              <>
+                                {hasBleed && (
+                                  <div className="absolute border-t-2 border-b-2 border-r-2 border-dashed border-red-500" style={{
+                                    top: `${0.125 * pxPerInchCover}px`,
+                                    bottom: `${0.125 * pxPerInchCover}px`,
+                                    right: `${0.125 * pxPerInchCover}px`,
+                                    left: 0,
+                                    ...guideStyles.bleed
+                                  }} />
+                                )}
+                                <div className="absolute border-2 border-dashed border-indigo-500" style={{
+                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchCover}px`,
+                                  left: `${0.25 * pxPerInchCover}px`,
+                                  ...guideStyles.safe
+                                }} />
+                              </>
+                            )}
+                            {renderSmartGuides('front')}
+                          </div>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                </div>
+                  );
+                })()
               )
             )}
 
@@ -1115,6 +1436,8 @@ export default function BookPreview() {
                     const currentSpread = spreads[activeSpreadIndex] || spreads[0];
                     const leftPage = currentSpread.left;
                     const rightPage = currentSpread.right;
+                    const isCropPreviewLeft = cropPreview.isActive && leftPage && cropPreview.pageId === leftPage.id;
+                    const isCropPreviewRight = cropPreview.isActive && rightPage && cropPreview.pageId === rightPage.id;
 
                     return (
                       <div className="flex flex-col items-center gap-4">
@@ -1135,8 +1458,10 @@ export default function BookPreview() {
                                 handleDragStart(e, null, leftPage.id);
                               }
                             }}
-                            className={`relative h-full border-r border-dashed border-slate-300 dark:border-slate-800 overflow-hidden cursor-pointer flex items-center justify-center transition-all ${
-                              leftPage && selectedPageId === leftPage.id ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
+                            className={`relative h-full border-r border-dashed border-slate-300 dark:border-slate-800 ${
+                              isCropPreviewLeft ? 'overflow-visible' : 'overflow-hidden'
+                            } cursor-pointer flex items-center justify-center transition-all ${
+                              leftPage && selectedPageId === leftPage.id && !isCropPreviewLeft ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
                             }`}
                             style={{
                               width: `${interiorPagePxWidth}px`
@@ -1152,44 +1477,59 @@ export default function BookPreview() {
                               ) : (
                                 <PreviewImage
                                   src={leftPage.preview}
-                                  xScale={leftPage.xScale}
-                                  yScale={leftPage.yScale}
-                                  xOffset={leftPage.xOffset}
-                                  yOffset={leftPage.yOffset}
+                                  xScale={isCropPreviewLeft ? cropPreview.currentScale : leftPage.xScale}
+                                  yScale={isCropPreviewLeft ? cropPreview.currentScale : leftPage.yScale}
+                                  xOffset={isCropPreviewLeft ? cropPreview.xOffset : leftPage.xOffset}
+                                  yOffset={isCropPreviewLeft ? cropPreview.yOffset : leftPage.yOffset}
                                   containerWidth={interiorPagePxWidth}
                                   containerHeight={interiorPreviewHeight}
-                                  isDragging={dragState.isDragging && selectedPageId === leftPage.id}
-                                  isSelected={selectedPageId === leftPage.id}
+                                  isDragging={dragState.isDragging && (selectedPageId === leftPage.id || isCropPreviewLeft)}
+                                  isSelected={selectedPageId === leftPage.id && !isCropPreviewLeft}
                                   onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, null, leftPage.id)}
+                                  onAspectRatioLoaded={(r, w, h) => handleAspectRatioLoaded(leftPage.id, r, w, h)}
                                 />
                               )
                             ) : null}
+
+                            {/* Crop Overlay for Left Page */}
+                            {isCropPreviewLeft && (
+                              <div className="absolute inset-0 pointer-events-none z-30 border-2 border-dashed border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]">
+                                <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded shadow flex items-center gap-1">
+                                  <Crop className="w-3 h-3" />
+                                  <span>{t('aspectRatio.cropOverlayLabel', 'Зона сохранения (Trim)')}</span>
+                                </div>
+                              </div>
+                            )}
                             
                             {/* Guides Layer for Left Page (Fixed to Left Page Canvas) */}
-                            <div className="absolute inset-0 pointer-events-none z-20">
-                              {hasBleed && (
+                            {showGuides && (
+                              <div className="absolute inset-0 pointer-events-none z-20">
+                                {hasBleed && (
+                                  <div
+                                    className="absolute border-t-2 border-b-2 border-l-2 border-dashed border-red-500"
+                                    style={{
+                                      top: `${0.125 * pxPerInchInterior}px`,
+                                      bottom: `${0.125 * pxPerInchInterior}px`,
+                                      left: `${0.125 * pxPerInchInterior}px`,
+                                      right: 0,
+                                      ...guideStyles.bleed
+                                    }}
+                                  />
+                                )}
+                                {/* Safe Margins & Gutter (Left page: Gutter on Right / Spine edge) */}
                                 <div
-                                  className="absolute border-t border-b border-l border-dashed border-red-500/50"
+                                  className="absolute border-2 border-dashed border-indigo-500"
                                   style={{
-                                    top: `${0.125 * pxPerInchInterior}px`,
-                                    bottom: `${0.125 * pxPerInchInterior}px`,
-                                    left: `${0.125 * pxPerInchInterior}px`,
-                                    right: 0
+                                    top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                    bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                    left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                    right: `${0.375 * pxPerInchInterior}px`,
+                                    ...guideStyles.safe
                                   }}
                                 />
-                              )}
-                              {/* Safe Margins & Gutter (Left page: Gutter on Right / Spine edge) */}
-                              <div
-                                className="absolute border border-dashed border-indigo-500/30"
-                                style={{
-                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
-                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
-                                  left: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
-                                  right: `${0.375 * pxPerInchInterior}px`
-                                }}
-                              />
-                              {leftPage && !leftPage.isBlank && renderSmartGuides(null, leftPage.id)}
-                            </div>
+                                {leftPage && !leftPage.isBlank && renderSmartGuides(null, leftPage.id)}
+                              </div>
+                            )}
                           </div>
 
                           {/* Right page container */}
@@ -1201,8 +1541,10 @@ export default function BookPreview() {
                                 handleDragStart(e, null, rightPage.id);
                               }
                             }}
-                            className={`relative h-full overflow-hidden cursor-pointer flex items-center justify-center transition-all ${
-                              rightPage && selectedPageId === rightPage.id ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
+                            className={`relative h-full ${
+                              isCropPreviewRight ? 'overflow-visible' : 'overflow-hidden'
+                            } cursor-pointer flex items-center justify-center transition-all ${
+                              rightPage && selectedPageId === rightPage.id && !isCropPreviewRight ? 'ring-2 ring-indigo-500 ring-inset' : 'hover:bg-slate-100/50'
                             }`}
                             style={{
                               width: `${interiorPagePxWidth}px`
@@ -1218,43 +1560,58 @@ export default function BookPreview() {
                               ) : (
                                 <PreviewImage
                                   src={rightPage.preview}
-                                  xScale={rightPage.xScale}
-                                  yScale={rightPage.yScale}
-                                  xOffset={rightPage.xOffset}
-                                  yOffset={rightPage.yOffset}
+                                  xScale={isCropPreviewRight ? cropPreview.currentScale : rightPage.xScale}
+                                  yScale={isCropPreviewRight ? cropPreview.currentScale : rightPage.yScale}
+                                  xOffset={isCropPreviewRight ? cropPreview.xOffset : rightPage.xOffset}
+                                  yOffset={isCropPreviewRight ? cropPreview.yOffset : rightPage.yOffset}
                                   containerWidth={interiorPagePxWidth}
                                   containerHeight={interiorPreviewHeight}
-                                  isDragging={dragState.isDragging && selectedPageId === rightPage.id}
-                                  isSelected={selectedPageId === rightPage.id}
+                                  isDragging={dragState.isDragging && (selectedPageId === rightPage.id || isCropPreviewRight)}
+                                  isSelected={selectedPageId === rightPage.id && !isCropPreviewRight}
                                   onResizeStart={(ev, hnd, iw, ih) => handleResizeStart(ev, hnd, iw, ih, null, rightPage.id)}
+                                  onAspectRatioLoaded={(r, w, h) => handleAspectRatioLoaded(rightPage.id, r, w, h)}
                                 />
                               )
                             ) : null}
+
+                            {/* Crop Overlay for Right Page */}
+                            {isCropPreviewRight && (
+                              <div className="absolute inset-0 pointer-events-none z-30 border-2 border-dashed border-amber-400 shadow-[0_0_0_9999px_rgba(15,23,42,0.65)]">
+                                <div className="absolute top-2 left-2 bg-amber-500 text-slate-950 text-[10px] font-extrabold px-2 py-0.5 rounded shadow flex items-center gap-1">
+                                  <Crop className="w-3 h-3" />
+                                  <span>{t('aspectRatio.cropOverlayLabel', 'Зона сохранения (Trim)')}</span>
+                                </div>
+                              </div>
+                            )}
                             
                             {/* Guides Layer for Right Page (Gutter on Left / Spine edge) */}
-                            <div className="absolute inset-0 pointer-events-none z-20">
-                              {hasBleed && (
+                            {showGuides && (
+                              <div className="absolute inset-0 pointer-events-none z-20">
+                                {hasBleed && (
+                                  <div
+                                    className="absolute border-t-2 border-b-2 border-r-2 border-dashed border-red-500"
+                                    style={{
+                                      top: `${0.125 * pxPerInchInterior}px`,
+                                      bottom: `${0.125 * pxPerInchInterior}px`,
+                                      right: `${0.125 * pxPerInchInterior}px`,
+                                      left: 0,
+                                      ...guideStyles.bleed
+                                    }}
+                                  />
+                                )}
                                 <div
-                                  className="absolute border-t border-b border-r border-dashed border-red-500/50"
+                                  className="absolute border-2 border-dashed border-indigo-500"
                                   style={{
-                                    top: `${0.125 * pxPerInchInterior}px`,
-                                    bottom: `${0.125 * pxPerInchInterior}px`,
-                                    right: `${0.125 * pxPerInchInterior}px`,
-                                    left: 0
+                                    top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                    bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                    right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
+                                    left: `${0.375 * pxPerInchInterior}px`,
+                                    ...guideStyles.safe
                                   }}
                                 />
-                              )}
-                              <div
-                                className="absolute border border-dashed border-indigo-500/30"
-                                style={{
-                                  top: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
-                                  bottom: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
-                                  right: `${(hasBleed ? 0.375 : 0.25) * pxPerInchInterior}px`,
-                                  left: `${0.375 * pxPerInchInterior}px`
-                                }}
-                              />
-                              {rightPage && !rightPage.isBlank && renderSmartGuides(null, rightPage.id)}
-                            </div>
+                                {rightPage && !rightPage.isBlank && renderSmartGuides(null, rightPage.id)}
+                              </div>
+                            )}
                           </div>
 
                         </div>
@@ -1519,6 +1876,108 @@ export default function BookPreview() {
                   <span>Сбросить сдвиг</span>
                 </button>
               </div>
+            </div>
+            
+            {/* Aspect Ratio Engine & Mode Switcher */}
+            <div className="p-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl space-y-3 text-left shadow-2xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 dark:border-slate-800/80 pb-3">
+                <div className="space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-xs font-bold text-slate-800 dark:text-slate-200">
+                      Режимы масштабирования (Aspect Ratio Engine)
+                    </span>
+                    {isRatioMismatch ? (
+                      <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-amber-500/15 text-amber-600 dark:text-amber-400 border border-amber-500/30">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        <span>{t('aspectRatio.mismatchAlert', 'Соотношение сторон изображения и холста не совпадает')}</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                        <Check className="w-3 h-3 flex-shrink-0" />
+                        <span>Пропорции совпадают</span>
+                      </span>
+                    )}
+                  </div>
+                  <div className="text-[10px] text-slate-400 font-mono">
+                    Холст: {containerRatio.toFixed(3)} ({baseW.toFixed(2)}" × {baseH.toFixed(2)}")
+                    {imgRatio && (
+                      <span> • Изображение: {imgRatio.toFixed(3)} (Δ: {ratioDiff.toFixed(3)})</span>
+                    )}
+                  </div>
+                </div>
+
+                {/* Mode Selector Buttons */}
+                <div className="flex items-center gap-2 self-start sm:self-auto">
+                  <button
+                    onClick={handleSetContain}
+                    type="button"
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      activeFitMode === 'contain' && !cropPreview.isActive
+                        ? 'bg-indigo-600 text-white shadow-sm ring-2 ring-indigo-500/30'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <Minimize2 className="w-3.5 h-3.5" />
+                    <span>{t('aspectRatio.containMode', 'Вписать (Contain)')}</span>
+                  </button>
+
+                  <button
+                    onClick={handleStartCoverPreview}
+                    type="button"
+                    className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                      activeFitMode === 'cover' || cropPreview.isActive
+                        ? 'bg-amber-600 text-white shadow-sm ring-2 ring-amber-500/30'
+                        : 'bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700'
+                    }`}
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>{t('aspectRatio.coverMode', 'Заполнить (Cover)')}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Mode Descriptions & Live Preview Action Bar */}
+              {cropPreview.isActive ? (
+                <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl flex flex-col sm:flex-row sm:items-center justify-between gap-3 animate-in fade-in">
+                  <div className="flex items-center gap-2">
+                    <Crop className="w-4 h-4 text-amber-500 flex-shrink-0 animate-pulse" />
+                    <div className="text-left">
+                      <div className="text-xs font-bold text-amber-700 dark:text-amber-300">
+                        {t('aspectRatio.previewActive', 'Режим превью: Заполнить (Cover)')}
+                      </div>
+                      <div className="text-[10px] text-amber-600/90 dark:text-amber-400/90">
+                        {t('aspectRatio.previewHint', 'Перетаскивайте изображение мышью, чтобы выбрать идеальную область кропа')}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 self-end sm:self-auto">
+                    <button
+                      onClick={handleCancelCrop}
+                      type="button"
+                      className="px-3 py-1.5 rounded-xl text-xs font-bold text-slate-600 dark:text-slate-300 bg-white dark:bg-slate-800 border border-slate-300 dark:border-slate-700 hover:bg-slate-50 cursor-pointer transition-colors"
+                    >
+                      {t('aspectRatio.cancelBtn', 'Отмена')}
+                    </button>
+                    <button
+                      onClick={handleApplyCrop}
+                      type="button"
+                      className="px-4 py-1.5 rounded-xl text-xs font-bold text-slate-950 bg-amber-400 hover:bg-amber-300 shadow-md cursor-pointer transition-all flex items-center gap-1.5"
+                    >
+                      <Check className="w-3.5 h-3.5" />
+                      <span>{t('aspectRatio.applyBtn', 'Применить')}</span>
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <div className="text-[10px] text-slate-500 dark:text-slate-400 flex items-center gap-1.5">
+                  <Info className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                  <span>
+                    {activeFitMode === 'cover'
+                      ? t('aspectRatio.coverDesc', 'Масштаб по меньшей стороне: белые полосы скрыты, применяется обрезка без изменения оригинала.')
+                      : t('aspectRatio.containDesc', 'Масштаб по большей стороне: всё изображение видно целиком, могут оставаться белые поля.')}
+                  </span>
+                </div>
+              )}
             </div>
             
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

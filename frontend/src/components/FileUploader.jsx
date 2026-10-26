@@ -1,7 +1,7 @@
 import React, { useRef, useState } from 'react';
 import { useApp } from '../context/AppContext';
 import { useTranslation } from 'react-i18next';
-import { Upload, Trash2, CheckCircle2, AlertCircle, Image as ImageIcon, BookOpen } from 'lucide-react';
+import { Upload, Trash2, CheckCircle2, AlertCircle, AlertTriangle, X, Image as ImageIcon, BookOpen } from 'lucide-react';
 import { getImageDimensions, resizeImageToFit } from '../utils/imageValidator';
 import { calculateSpineWidth, calculateCoverDimensions } from '../utils/kdpMath';
 import ImageValidationModal from './ImageValidationModal';
@@ -31,6 +31,7 @@ export default function FileUploader() {
   const [dragActiveCover, setDragActiveCover] = useState({ front: false, spine: false, back: false, interior: false, full: false });
   const [error, setError] = useState('');
   const [validationModalData, setValidationModalData] = useState(null);
+  const [aspectRatioToast, setAspectRatioToast] = useState(null);
 
   const frontInputRef = useRef(null);
   const spineInputRef = useRef(null);
@@ -91,12 +92,20 @@ export default function FileUploader() {
         return; // Hard block, file is rejected
       }
 
-      // 2. Format / Aspect Ratio Check
+      // 2. Format / Aspect Ratio Check (Aspect Ratio Engine threshold: 0.01)
       const targetRatio = reqWidthPx / reqHeightPx;
       const actualRatio = dims.width / dims.height;
       const ratioDiff = Math.abs(targetRatio - actualRatio);
 
-      if (ratioDiff > 0.02) {
+      if (ratioDiff > 0.01) {
+        // Trigger UI Notification (Alert/Toast)
+        setAspectRatioToast({
+          visible: true,
+          fileName: file.name,
+          ratioDiff: ratioDiff.toFixed(3)
+        });
+
+        // Trigger Validation Modal for Contain / Cover options
         setValidationModalData({
           fileName: file.name,
           currentWidth: dims.width,
@@ -106,6 +115,9 @@ export default function FileUploader() {
           onOptimize: async () => {
             const resized = await resizeImageToFit(file, reqWidthPx, reqHeightPx);
             onSuccess(resized);
+          },
+          onCover: () => {
+            onSuccess(file);
           },
           onKeep: () => {
             onSuccess(file);
@@ -214,6 +226,30 @@ export default function FileUploader() {
         validationData={validationModalData}
         onClose={() => setValidationModalData(null)}
       />
+
+      {/* Aspect Ratio Mismatch Toast Alert Notification */}
+      {aspectRatioToast && (
+        <div className="flex items-start justify-between gap-3 p-3 text-amber-900 bg-amber-50 dark:bg-amber-950/50 border border-amber-300 dark:border-amber-700/60 rounded-xl text-xs font-semibold shadow-sm animate-in fade-in slide-in-from-top-1">
+          <div className="flex items-start gap-2.5">
+            <AlertTriangle className="w-4 h-4 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
+            <div>
+              <span className="block font-bold">
+                {t('aspectRatio.mismatchAlert', 'Соотношение сторон изображения и холста не совпадает')}
+              </span>
+              <span className="text-[11px] font-normal text-amber-800 dark:text-amber-300">
+                {aspectRatioToast.fileName} (Δ = {aspectRatioToast.ratioDiff}) — выберите «Вписать» или «Заполнить» с превью.
+              </span>
+            </div>
+          </div>
+          <button
+            onClick={() => setAspectRatioToast(null)}
+            type="button"
+            className="text-amber-700 dark:text-amber-300 hover:text-amber-900 dark:hover:text-white p-1 rounded-lg hover:bg-amber-100 dark:hover:bg-amber-900/40 cursor-pointer"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 p-3 text-red-700 bg-red-50 border border-red-200 rounded-xl animate-shake text-xs font-semibold">

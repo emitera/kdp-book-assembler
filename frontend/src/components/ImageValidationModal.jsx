@@ -21,6 +21,11 @@ export default function ImageValidationModal({ isOpen, validationData, onClose }
     ? `${(currentWidth / 300).toFixed(3)} × ${(currentHeight / 300).toFixed(3)} in`
     : `${currentWidth} × ${currentHeight} px`;
 
+  const reqRatio = (requiredWidth / requiredHeight).toFixed(3);
+  const actualRatio = (currentWidth / currentHeight).toFixed(3);
+  const ratioLabelReq = `Ratio: ${reqRatio}`;
+  const ratioLabelActual = `Ratio: ${actualRatio}`;
+
   const handleOptimizeClick = async () => {
     setIsProcessing(true);
     try {
@@ -57,11 +62,11 @@ export default function ImageValidationModal({ isOpen, validationData, onClose }
           <div className="inline-flex p-3 bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 rounded-2xl mb-1">
             <AlertTriangle className="w-8 h-8 animate-bounce" />
           </div>
-          <h3 className="text-lg font-bold text-slate-900 dark:text-white">
-            Неверные пропорции
+          <h3 className="text-base sm:text-lg font-bold text-slate-900 dark:text-white leading-snug">
+            {t('aspectRatio.mismatchAlert', 'Соотношение сторон изображения и холста не совпадает')}
           </h3>
           <p className="text-xs text-slate-550 dark:text-slate-400 leading-relaxed">
-            Пропорции изображения не совпадают с выбранным форматом книги. Оптимизировать расположение?
+            {t('aspectRatio.detectedSubtitle', 'Разница соотношений сторон превышает 0.01. Выберите режим отображения:')}
           </p>
         </div>
 
@@ -74,50 +79,80 @@ export default function ImageValidationModal({ isOpen, validationData, onClose }
           <div className="grid grid-cols-2 gap-3 text-xs pt-1">
             <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-xl space-y-0.5">
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
-                Требуется
+                {t('validation.required', 'Требуется (Холст)')}
               </span>
               <strong className="text-xs font-bold text-indigo-600 dark:text-indigo-400 block">
                 {requiredLabel}
               </strong>
+              <span className="text-[9px] text-slate-450 block font-mono">
+                {ratioLabelReq}
+              </span>
             </div>
 
             <div className="p-2.5 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-850 rounded-xl space-y-0.5">
               <span className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold block">
-                Загружено
+                {t('validation.uploaded', 'Загружено (Картинка)')}
               </span>
               <strong className="text-xs font-bold text-amber-600 dark:text-amber-400 block">
                 {uploadedLabel}
               </strong>
+              <span className="text-[9px] text-slate-450 block font-mono">
+                {ratioLabelActual}
+              </span>
             </div>
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="flex flex-col sm:flex-row gap-3 pt-2">
-          <button
-            onClick={handleOptimizeClick}
-            disabled={isProcessing}
-            onMouseEnter={() => setIsHovered(true)}
-            onMouseLeave={() => setIsHovered(false)}
-            type="button"
-            className="flex-1 py-3 px-4 text-white rounded-xl text-xs font-bold shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer border border-transparent"
-            style={{ backgroundColor: isHovered ? '#4338ca' : '#4f46e5' }}
-          >
-            {isProcessing ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
+        {/* Action Buttons: Contain, Cover, Keep */}
+        <div className="space-y-2 pt-1">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+            {/* Mode 1: Contain */}
+            <button
+              onClick={handleOptimizeClick}
+              disabled={isProcessing}
+              type="button"
+              className="p-3 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex flex-col items-center justify-center gap-1 cursor-pointer border border-transparent text-center"
+            >
+              {isProcessing ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Sparkles className="w-4 h-4" />
+              )}
+              <span>{t('aspectRatio.containMode', '«Вписать (Contain)»')}</span>
+              <span className="text-[9px] opacity-80 font-normal">
+                {t('aspectRatio.containDesc', 'По большей стороне, с краями')}
+              </span>
+            </button>
+
+            {/* Mode 2: Cover */}
+            <button
+              onClick={() => {
+                if (validationData.onCover) {
+                  validationData.onCover();
+                } else {
+                  onKeep();
+                }
+                onClose();
+              }}
+              disabled={isProcessing}
+              type="button"
+              className="p-3 bg-emerald-650 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md transition-all flex flex-col items-center justify-center gap-1 cursor-pointer border border-transparent text-center"
+            >
               <Sparkles className="w-4 h-4" />
-            )}
-            <span>Оптимизировать</span>
-          </button>
+              <span>{t('aspectRatio.coverMode', '«Заполнить (Cover)»')}</span>
+              <span className="text-[9px] opacity-80 font-normal">
+                {t('aspectRatio.coverDesc', 'Без белых полос, с превью')}
+              </span>
+            </button>
+          </div>
 
           <button
             onClick={handleKeepClick}
             disabled={isProcessing}
             type="button"
-            className="py-3 px-6 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-700 dark:text-slate-355 rounded-xl text-xs font-bold transition-all cursor-pointer text-center"
+            className="w-full py-2.5 px-4 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-750 text-slate-600 dark:text-slate-350 rounded-xl text-xs font-semibold transition-all cursor-pointer text-center"
           >
-            Сохранить исходный
+            {t('validation.noKeep', 'Оставить как есть (без изменений)')}
           </button>
         </div>
 

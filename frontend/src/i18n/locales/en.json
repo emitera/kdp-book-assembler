@@ -121,5 +121,35 @@
     "submitBtn": "Submit Ticket",
     "successMessage": "Thank you! Your support ticket has been received. We will contact you at {{email}}.",
     "errorMessage": "Failed to submit support request. Please try again."
+  },
+  "legend": {
+    "title": "KDP Guide Lines",
+    "subtitle": "Canvas Color Codes",
+    "toggle": "Guides Legend",
+    "hide": "Hide Guides",
+    "show": "Show Guides",
+    "bleed": "Bleed (Trim Line)",
+    "bleedDesc": "Red dashed line — KDP cutting boundary (0.125\" / 3.2 mm)",
+    "safeMargin": "Safe Margin",
+    "safeMarginDesc": "Indigo dashed line — keep all vital text & faces inside",
+    "gutterHinge": "Gutter / Hinge",
+    "gutterHingeDesc": "Cyan dashed line — spine fold channels & inner binding margin",
+    "barcode": "Barcode Zone",
+    "barcodeDesc": "Amber dashed box — reserved ISBN barcode space (2\" × 1.2\")"
+  },
+  "aspectRatio": {
+    "mismatchAlert": "The aspect ratio of the image and the canvas does not match",
+    "containMode": "Contain",
+    "coverMode": "Cover",
+    "containDesc": "Scale by larger dimension, preserves full image (leaves empty borders)",
+    "coverDesc": "Scale by smaller dimension, eliminates white bars (activates crop preview)",
+    "previewActive": "Cover Crop Preview Mode",
+    "previewHint": "Drag (pan) the image with mouse to select the ideal crop area",
+    "applyBtn": "Apply",
+    "cancelBtn": "Cancel",
+    "cropOverlayLabel": "Crop Zone",
+    "aspectRatioDiff": "Aspect ratio difference: {{diff}}",
+    "detectedTitle": "Aspect Ratio Mismatch Detected",
+    "detectedSubtitle": "Aspect ratio difference exceeds 0.01. Choose an optimization mode:"
   }
 }

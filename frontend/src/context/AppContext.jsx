@@ -304,7 +304,15 @@ export const AppProvider = ({ children }) => {
       xOffset: 0,
       yOffset: 0,
       xScale: 1.0,
-      yScale: 1.0
+      yScale: 1.0,
+      fitMode: 'contain',
+      transform: {
+        xOffset: 0,
+        yOffset: 0,
+        xScale: 1.0,
+        yScale: 1.0,
+        fitMode: 'contain'
+      }
     };
     
     revokeFilePreview(frontCover);
@@ -334,7 +342,15 @@ export const AppProvider = ({ children }) => {
       xOffset: 0,
       yOffset: 0,
       xScale: 1.0,
-      yScale: 1.0
+      yScale: 1.0,
+      fitMode: 'contain',
+      transform: {
+        xOffset: 0,
+        yOffset: 0,
+        xScale: 1.0,
+        yScale: 1.0,
+        fitMode: 'contain'
+      }
     });
   };
 
@@ -353,7 +369,15 @@ export const AppProvider = ({ children }) => {
       xOffset: 0,
       yOffset: 0,
       xScale: 1.0,
-      yScale: 1.0
+      yScale: 1.0,
+      fitMode: 'contain',
+      transform: {
+        xOffset: 0,
+        yOffset: 0,
+        xScale: 1.0,
+        yScale: 1.0,
+        fitMode: 'contain'
+      }
     });
   };
 
@@ -372,22 +396,63 @@ export const AppProvider = ({ children }) => {
       xOffset: 0,
       yOffset: 0,
       xScale: 1.0,
-      yScale: 1.0
+      yScale: 1.0,
+      fitMode: 'contain',
+      transform: {
+        xOffset: 0,
+        yOffset: 0,
+        xScale: 1.0,
+        yScale: 1.0,
+        fitMode: 'contain'
+      }
     }));
 
     setInteriorPages(pages);
   };
 
   const updateFrontCoverTransform = (updates) => {
-    setFrontCover(prev => prev ? { ...prev, ...updates } : null);
+    setFrontCover(prev => {
+      if (!prev) return null;
+      const next = { ...prev, ...updates };
+      next.transform = {
+        xScale: next.xScale ?? 1.0,
+        yScale: next.yScale ?? 1.0,
+        xOffset: next.xOffset ?? 0,
+        yOffset: next.yOffset ?? 0,
+        fitMode: next.fitMode || 'contain'
+      };
+      return next;
+    });
   };
 
   const updateBackCoverTransform = (updates) => {
-    setBackCover(prev => prev ? { ...prev, ...updates } : null);
+    setBackCover(prev => {
+      if (!prev) return null;
+      const next = { ...prev, ...updates };
+      next.transform = {
+        xScale: next.xScale ?? 1.0,
+        yScale: next.yScale ?? 1.0,
+        xOffset: next.xOffset ?? 0,
+        yOffset: next.yOffset ?? 0,
+        fitMode: next.fitMode || 'contain'
+      };
+      return next;
+    });
   };
 
   const updateFullCoverTransform = (updates) => {
-    setFullCover(prev => prev ? { ...prev, ...updates } : null);
+    setFullCover(prev => {
+      if (!prev) return null;
+      const next = { ...prev, ...updates };
+      next.transform = {
+        xScale: next.xScale ?? 1.0,
+        yScale: next.yScale ?? 1.0,
+        xOffset: next.xOffset ?? 0,
+        yOffset: next.yOffset ?? 0,
+        fitMode: next.fitMode || 'contain'
+      };
+      return next;
+    });
   };
 
   const handleSetFullCover = (file) => {
@@ -404,16 +469,46 @@ export const AppProvider = ({ children }) => {
       xOffset: 0,
       yOffset: 0,
       xScale: 1.0,
-      yScale: 1.0
+      yScale: 1.0,
+      fitMode: 'contain',
+      transform: {
+        xOffset: 0,
+        yOffset: 0,
+        xScale: 1.0,
+        yScale: 1.0,
+        fitMode: 'contain'
+      }
     });
   };
 
   const updateSpineImageTransform = (updates) => {
-    setSpineImage(prev => prev ? { ...prev, ...updates } : null);
+    setSpineImage(prev => {
+      if (!prev) return null;
+      const next = { ...prev, ...updates };
+      next.transform = {
+        xScale: next.xScale ?? 1.0,
+        yScale: next.yScale ?? 1.0,
+        xOffset: next.xOffset ?? 0,
+        yOffset: next.yOffset ?? 0,
+        fitMode: next.fitMode || 'contain'
+      };
+      return next;
+    });
   };
 
   const updatePageTransform = (pageId, updates) => {
-    setInteriorPages(prev => prev.map(p => p.id === pageId ? { ...p, ...updates } : p));
+    setInteriorPages(prev => prev.map(p => {
+      if (p.id !== pageId) return p;
+      const next = { ...p, ...updates };
+      next.transform = {
+        xScale: next.xScale ?? 1.0,
+        yScale: next.yScale ?? 1.0,
+        xOffset: next.xOffset ?? 0,
+        yOffset: next.yOffset ?? 0,
+        fitMode: next.fitMode || 'contain'
+      };
+      return next;
+    }));
   };
 
   const handleClearAll = () => {
