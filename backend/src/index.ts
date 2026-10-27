@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { createCheckoutSession, handlePaymentWebhook } from './billing';
-import { generateProJWT, verifyUserSession } from './auth';
+import { generateProJWT, verifyUserSession, verifyAdminUser, verifyPaddleWebhookSignature } from './auth';
 import { getSupabaseClient } from './db';
 
 type Bindings = {
@@ -38,7 +38,7 @@ app.use('/*', cors({
     return 'https://birdypages.io';
   },
   allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowHeaders: ['Content-Type', 'Authorization', 'x-paddle-signature'],
+  allowHeaders: ['Content-Type', 'Authorization', 'x-paddle-signature', 'Paddle-Signature', 'paddle-signature'],
   exposeHeaders: ['Content-Length'],
   maxAge: 600
 }));
@@ -46,8 +46,31 @@ app.use('/*', cors({
 app.get('/', (c) => c.text('Birdy Pages Backend API Running (Paddle MoR Exclusive)'));
 
 // ==============================================================================
-// HELPER FUNCTIONS
+// RATE LIMITER & HELPER FUNCTIONS
 // ==============================================================================
+
+interface RateLimitRecord {
+  count: number;
+  resetAt: number;
+}
+const rateLimitMap = new Map<string, RateLimitRecord>();
+
+/**
+ * In-memory sliding window rate limiter for edge workers
+ */
+function isRateLimited(key: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  const record = rateLimitMap.get(key);
+  if (!record || record.resetAt < now) {
+    rateLimitMap.set(key, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  if (record.count >= limit) {
+    return true;
+  }
+  record.count++;
+  return false;
+}
 
 /**
  * Generate Cryptographic License Key Format: BIRDY-XXXX-XXXX-XXXX
@@ -164,6 +187,19 @@ app.post('/api/webhooks/paddle', async (c) => {
 
   try {
     const rawBody = await c.req.text();
+    const signatureHeader = c.req.header('paddle-signature') || c.req.header('Paddle-Signature') || c.req.header('x-paddle-signature');
+
+    // Strict HMAC-SHA256 signature verification if secret configured
+    if (c.env.PADDLE_WEBHOOK_SECRET) {
+      const isValid = await verifyPaddleWebhookSignature(rawBody, signatureHeader, c.env.PADDLE_WEBHOOK_SECRET);
+      if (!isValid) {
+        console.error('[Paddle Webhook] Rejected: Invalid or expired webhook signature');
+        return c.json({ error: 'Unauthorized: Invalid webhook signature' }, 401);
+      }
+    } else {
+      console.warn('[Paddle Webhook] PADDLE_WEBHOOK_SECRET is not configured on this environment.');
+    }
+
     let event: any;
     try {
       event = JSON.parse(rawBody);
@@ -270,6 +306,11 @@ app.post('/api/webhooks/paddle', async (c) => {
  * POST /api/desktop/validate-license
  */
 app.post('/api/desktop/validate-license', async (c) => {
+  const clientIp = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown';
+  if (isRateLimited(`license:${clientIp}`, 30, 60_000)) {
+    return c.json({ valid: false, error: 'RATE_LIMIT_EXCEEDED', message: 'Too many license validation requests. Please wait a minute.' }, 429);
+  }
+
   const supabase = getSupabaseClient(c.env);
   const body = await c.req.json<{ license_key: string; hardware_id: string }>();
 
@@ -316,6 +357,19 @@ app.post('/api/desktop/validate-license', async (c) => {
     plan: (license.profiles as any)?.subscription_status || 'desktop_pro',
     expires_at: license.expires_at
   });
+});
+
+// ==============================================================================
+// ADMIN AUTHORIZATION MIDDLEWARE
+// Strictly requires valid Supabase session AND 'admin' role in profiles table
+// ==============================================================================
+app.use('/api/admin/*', async (c, next) => {
+  const authHeader = c.req.header('Authorization');
+  const result = await verifyAdminUser(c.env, authHeader);
+  if (!result.authorized) {
+    return c.json({ error: result.error }, result.status as any);
+  }
+  await next();
 });
 
 // ==============================================================================
@@ -478,6 +532,11 @@ app.post('/api/create-checkout', async (c) => {
  */
 app.post('/api/support/ticket', async (c) => {
   try {
+    const clientIp = c.req.header('cf-connecting-ip') || c.req.header('x-forwarded-for') || 'unknown';
+    if (isRateLimited(`ticket:${clientIp}`, 5, 10 * 60_000)) {
+      return c.json({ error: 'Too many support tickets submitted. Please wait 10 minutes before submitting again.' }, 429);
+    }
+
     const body = await c.req.json();
     const { email, subject, category, message, userId } = body;
 
@@ -601,6 +660,59 @@ app.get('/api/admin/users', async (c) => {
     return c.json({ users: users || [] });
   } catch (err: any) {
     return c.json({ error: err.message || 'Failed to fetch users' }, 500);
+  }
+});
+
+/**
+ * Admin API: Create New User (Auth + Profile)
+ * POST /api/admin/create-user
+ */
+app.post('/api/admin/create-user', async (c) => {
+  try {
+    const body = await c.req.json();
+    const { email, password, role, subscriptionStatus, isLifetimeFree, generationCredits } = body;
+
+    if (!email || !password) {
+      return c.json({ error: 'Email and password are required' }, 400);
+    }
+
+    const supabase = getSupabaseClient(c.env);
+
+    // Create auth account via Supabase Admin Auth API
+    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true
+    });
+
+    if (authError || !authData.user) {
+      return c.json({ error: authError?.message || 'Failed to create user in Auth' }, 400);
+    }
+
+    const userId = authData.user.id;
+
+    // Upsert the profile record
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .upsert({
+        id: userId,
+        email,
+        role: role || 'user',
+        subscription_status: subscriptionStatus || 'free',
+        is_lifetime_free: Boolean(isLifetimeFree),
+        generation_credits: Math.max(0, parseInt(String(generationCredits), 10) || 0),
+        updated_at: new Date().toISOString()
+      })
+      .select('id, email, subscription_status, subscription_expires_at, role, is_lifetime_free, generation_credits')
+      .single();
+
+    if (profileError) {
+      return c.json({ error: profileError.message }, 500);
+    }
+
+    return c.json({ success: true, user: profile });
+  } catch (err: any) {
+    return c.json({ error: err.message || 'Failed to create user' }, 500);
   }
 });
 
@@ -892,7 +1004,13 @@ app.get('/api/admin/payment-settings', async (c) => {
       });
     }
 
-    return c.json(settings);
+    // Mask paddle_api_key to avoid leaking plaintext in admin network requests
+    const maskedSettings = { ...settings };
+    if (maskedSettings.paddle_api_key && maskedSettings.paddle_api_key.length > 8) {
+      maskedSettings.paddle_api_key = `${maskedSettings.paddle_api_key.slice(0, 4)}••••••••${maskedSettings.paddle_api_key.slice(-4)}`;
+    }
+
+    return c.json(maskedSettings);
   } catch (err: any) {
     return c.json({ error: err.message || 'Failed to fetch payment settings' }, 500);
   }
@@ -915,17 +1033,23 @@ app.post('/api/admin/update-payment-settings', async (c) => {
     } = body;
 
     const supabase = getSupabaseClient(c.env);
-    const payload = {
+    const payload: any = {
       id: 'global',
       active_gateway: 'paddle',
       paddle_environment: paddle_environment || 'sandbox',
       paddle_client_token: paddle_client_token ?? '',
-      paddle_api_key: paddle_api_key ?? '',
       paddle_price_onetime: paddle_price_onetime ?? '',
       paddle_price_monthly: paddle_price_monthly ?? '',
       paddle_price_yearly: paddle_price_yearly ?? '',
       updated_at: new Date().toISOString()
     };
+
+    // Only update paddle_api_key if a new unmasked string is provided
+    if (paddle_api_key && !paddle_api_key.includes('••••')) {
+      payload.paddle_api_key = paddle_api_key;
+    } else if (paddle_api_key === '') {
+      payload.paddle_api_key = '';
+    }
 
     const { data: updated, error } = await supabase
       .from('payment_settings')

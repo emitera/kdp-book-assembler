@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '../context/AppContext';
+import { supabase } from '../services/supabaseClient';
 import { 
   Users, 
   Search, 
@@ -85,15 +86,38 @@ export default function AdminPanel() {
   const [creatingUser, setCreatingUser] = useState(false);
   const [createUserError, setCreateUserError] = useState('');
 
+  const getAuthHeaders = async () => {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        return { 'Authorization': `Bearer ${session.access_token}` };
+      }
+    } catch (err) {
+      console.warn('Failed to retrieve session for admin headers:', err);
+    }
+    return {};
+  };
+
+  const adminFetch = async (url, options = {}) => {
+    const authHeaders = await getAuthHeaders();
+    return fetch(url, {
+      ...options,
+      headers: {
+        ...authHeaders,
+        ...(options.headers || {})
+      }
+    });
+  };
+
   const fetchUsersAndSettings = async () => {
     setLoading(true);
     try {
       const [usersRes, settingsRes, paymentRes, ticketsRes, licensesRes] = await Promise.all([
-        fetch(`${API_URL}/api/admin/users`),
+        adminFetch(`${API_URL}/api/admin/users`),
         fetch(`${API_URL}/api/settings`),
-        fetch(`${API_URL}/api/admin/payment-settings`),
-        fetch(`${API_URL}/api/admin/support-tickets`).catch(() => ({ ok: false })),
-        fetch(`${API_URL}/api/admin/licenses`).catch(() => ({ ok: false }))
+        adminFetch(`${API_URL}/api/admin/payment-settings`),
+        adminFetch(`${API_URL}/api/admin/support-tickets`).catch(() => ({ ok: false })),
+        adminFetch(`${API_URL}/api/admin/licenses`).catch(() => ({ ok: false }))
       ]);
 
       if (usersRes.ok) {
@@ -148,7 +172,7 @@ export default function AdminPanel() {
     setCreateUserError('');
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/create-user`, {
+      const res = await adminFetch(`${API_URL}/api/admin/create-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -186,7 +210,7 @@ export default function AdminPanel() {
   const handleUpdateRole = async (targetUserId, role) => {
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/update-user-role`, {
+      const res = await adminFetch(`${API_URL}/api/admin/update-user-role`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: targetUserId, role })
@@ -210,7 +234,7 @@ export default function AdminPanel() {
     }
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/delete-user`, {
+      const res = await adminFetch(`${API_URL}/api/admin/delete-user`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: targetUserId })
@@ -231,7 +255,7 @@ export default function AdminPanel() {
   const handleToggleLifetime = async (targetUserId, currentStatus) => {
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/toggle-lifetime`, {
+      const res = await adminFetch(`${API_URL}/api/admin/toggle-lifetime`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: targetUserId, isLifetimeFree: !currentStatus })
@@ -255,7 +279,7 @@ export default function AdminPanel() {
         ? { userId: targetUserId, credits: directValue }
         : { userId: targetUserId, delta };
 
-      const res = await fetch(`${API_URL}/api/admin/update-user-credits`, {
+      const res = await adminFetch(`${API_URL}/api/admin/update-user-credits`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -278,7 +302,7 @@ export default function AdminPanel() {
   const handleUpdatePlan = async (targetUserId, plan) => {
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/update-user-plan`, {
+      const res = await adminFetch(`${API_URL}/api/admin/update-user-plan`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: targetUserId, plan })
@@ -305,7 +329,7 @@ export default function AdminPanel() {
     }
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/cancel-subscription`, {
+      const res = await adminFetch(`${API_URL}/api/admin/cancel-subscription`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userId: targetUserId })
@@ -329,7 +353,7 @@ export default function AdminPanel() {
   const handleGenerateLicense = async (targetUserId, targetEmail) => {
     setUpdatingUserId(targetUserId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/generate-license`, {
+      const res = await adminFetch(`${API_URL}/api/admin/generate-license`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ user_id: targetUserId, send_email: true })
@@ -337,7 +361,7 @@ export default function AdminPanel() {
       const data = await res.json();
       if (data.success) {
         setStatusMessage({ type: 'success', text: `Ключ ${data.license.license_key} успешно выдан для ${targetEmail}!` });
-        const licRes = await fetch(`${API_URL}/api/admin/licenses`);
+        const licRes = await adminFetch(`${API_URL}/api/admin/licenses`);
         if (licRes.ok) {
           const lData = await licRes.json();
           setLicensesList(lData.licenses || []);
@@ -358,7 +382,7 @@ export default function AdminPanel() {
       return;
     }
     try {
-      const res = await fetch(`${API_URL}/api/admin/revoke-license`, {
+      const res = await adminFetch(`${API_URL}/api/admin/revoke-license`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ license_id: licenseId })
@@ -387,7 +411,7 @@ export default function AdminPanel() {
     setPriceSuccess(false);
 
     try {
-      const res = await fetch(`${API_URL}/api/admin/update-pricing`, {
+      const res = await adminFetch(`${API_URL}/api/admin/update-pricing`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -432,7 +456,7 @@ export default function AdminPanel() {
         paddle_price_yearly: paddlePriceYearly
       };
 
-      const res = await fetch(`${API_URL}/api/admin/update-payment-settings`, {
+      const res = await adminFetch(`${API_URL}/api/admin/update-payment-settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
@@ -458,7 +482,7 @@ export default function AdminPanel() {
   const handleUpdateTicketStatus = async (ticketId, newStatus) => {
     setUpdatingTicketId(ticketId);
     try {
-      const res = await fetch(`${API_URL}/api/admin/update-ticket-status`, {
+      const res = await adminFetch(`${API_URL}/api/admin/update-ticket-status`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ticketId, status: newStatus })

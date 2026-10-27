@@ -61,10 +61,13 @@ export function calculateCoverDimensions(trimWidth, trimHeight, spineWidth, hasB
     const height = trimHeight + (HARDCOVER_WRAP_INCHES * 2);
     return { width, height };
   }
-  const width = (trimWidth * 2) + spineWidth + (hasBleed ? (BLEED_INCHES * 2) : 0);
-  const height = trimHeight + (hasBleed ? (BLEED_INCHES * 2) : 0);
+  // Amazon KDP strictly requires a 0.125" bleed on all sides of paperback covers
+  // regardless of whether the interior pages have bleed.
+  const width = (trimWidth * 2) + spineWidth + (BLEED_INCHES * 2);
+  const height = trimHeight + (BLEED_INCHES * 2);
   return { width, height };
 }
+
 
 /**
  * Calculates interior page PDF dimensions in inches.
