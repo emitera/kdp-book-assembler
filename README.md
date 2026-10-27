@@ -106,7 +106,9 @@ npm run deploy
 ## 📖 Documentation Links
 
 - [📚 Master Documentation Index](docs/master_index.md)
+- [🛡️ Security Audit & Vulnerability Report](docs/AUDIT_AND_SECURITY_REPORT.md)
 - [🏗 System Architecture & AppSec Model](docs/architecture.md)
+- [🌐 Deployment, CI/CD & DevOps Guide](docs/deployment_and_devops.md)
 - [📐 Core KDP Math Engine](docs/kdp_math.md)
 - [🎨 UI Rendering & Zero-Crop Policy](docs/rendering_engine.md)
 - [🚀 Desktop Bridge & AI Upscaling](docs/desktop_bridge.md)
@@ -116,3 +118,4 @@ npm run deploy
 ## 📄 License & Intellectual Property
 
 Proprietary Software. All rights reserved © Birdy Pages / Emitera.
+

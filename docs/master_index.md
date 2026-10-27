@@ -34,14 +34,25 @@ Master Blueprint and Legal Documentation suite for **Birdy Pages** (Web Applicat
    * 4.4 Local AI Upscaling Pipeline (Real-ESRGAN / ONNX Runtime)
    * 4.5 Offline/Online License Verification System with Hardware ID Binding
 
+5. [🛡️ **`AUDIT_AND_SECURITY_REPORT.md`** — Комплексный Аудит Архитектуры, Безопасности и Биллинга](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/AUDIT_AND_SECURITY_REPORT.md)
+   * Сводное резюме аудита (Executive Summary) и матрица уязвимостей (SEC-01 – SEC-10)
+   * Анализ векторов атак (Admin Auth Bypass, Paddle Webhook Spoofing, KDP Bleed Defect)
+   * Готовые Remediation-патчи и дорожная карта устранения
+
+6. [🌐 **`deployment_and_devops.md`** — Развертывание, CI/CD и DevOps](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/deployment_and_devops.md)
+   * Хостинг Cloudflare Pages (Frontend), Cloudflare Workers (Backend API)
+   * Заголовки безопасности `_headers` (CSP, Clickjacking protection) и SPA Rewrite `_redirects`
+   * Настройка DNS (`birdypages.io`) и автоматический Keep-Alive воркер GitHub Actions
+
 ---
 
 ### II. Desktop Legal Drafts (EULA, Privacy & Refund Policies)
-5. [📜 **`terms_desktop_draft.md`** — Desktop EULA & Terms of Service](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/terms_desktop_draft.md)
+7. [📜 **`terms_desktop_draft.md`** — Desktop EULA & Terms of Service](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/terms_desktop_draft.md)
    * Single-User License Grant, Node-Locked Hardware ID Binding (`hardware_id`), No-Resale Clause, Reverse Engineering Prohibitions, KDP Approval Disclaimers.
 
-6. [🔒 **`privacy_desktop_draft.md`** — Desktop Privacy Policy (Zero-Upload Standard)](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/privacy_desktop_draft.md)
+8. [🔒 **`privacy_desktop_draft.md`** — Desktop Privacy Policy (Zero-Upload Standard)](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/privacy_desktop_draft.md)
    * 100% Local File Processing Guarantee, Local AI Upscaling, Cryptographic SHA-256 Hardware ID Telemetry, Paddle Merchant of Record Privacy Standards.
 
-7. [💳 **`refund_desktop_draft.md`** — Desktop Refund Policy](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/refund_desktop_draft.md)
+9. [💳 **`refund_desktop_draft.md`** — Desktop Refund Policy](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/refund_desktop_draft.md)
    * 14-Day Money-Back Guarantee, Instant Remote License Revocation (`revoked` status), Technical KDP Rejection Guarantee, Anti-Abuse Safeguards.
+
