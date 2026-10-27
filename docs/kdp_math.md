@@ -39,6 +39,10 @@ $$W_\text{spine} = N_\text{pages} \times T_\text{paper}$$
 $$W_\text{cover\_pb} = (2 \times W_\text{trim}) + W_\text{spine} + (2 \times 0.125'')$$
 $$H_\text{cover\_pb} = H_\text{trim} + (2 \times 0.125'')$$
 
+> **Amazon KDP Mandatory Preflight Requirement:**
+> Paperback cover spreads submitted to Amazon KDP **strictly require** a $0.125''$ ($3.2\text{ mm}$) bleed allowance on all 4 outer edges ($+0.250''$ total width, $+0.250''$ total height). This rule applies **unconditionally**, regardless of whether the book interior was formatted with bleed or without bleed (`hasBleed = false`). Cover dimensions without bleed are rejected automatically by KDP Print Verification.
+
+
 ### 4. Hardcover Full Cover Spread:
 KDP Hardcover uses wrap foldovers and board hinge allowances:
 $$W_\text{wrap} = 0.591'', \quad W_\text{hinge} = 0.394''$$

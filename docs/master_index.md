@@ -9,14 +9,17 @@ Master Blueprint and Legal Documentation suite for **Birdy Pages** (Web Applicat
 ### I. Technical Architecture & Engineering Specifications
 1. [🏗 **`architecture.md`** — System Architecture & Tech Stack](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/architecture.md)
    * 1.1 Technology Stack & System Topology
-   * 1.2 Supabase Database Schema (`profiles`, `desktop_licenses`, `payment_settings`, `support_tickets`) & RLS Policies
+   * 1.2 Supabase Database Schema (`profiles`, `desktop_licenses`, `payment_settings`, `support_tickets`, `healthcheck`) & RLS Policies
    * 1.3 Auth, Payment Routing & Paddle MoR Pipeline
    * 1.4 Admin CRM & License Control Hub
+   * 1.5 Security Architecture, AppSec & Defense-in-Depth (Admin Auth Middleware, Paddle HMAC Verification, Rate Limiting)
+   * 1.6 Supabase Anti-Idle Infrastructure (Keep-Alive Cron Worker & REST Heartbeats)
+   * 1.7 Frontend Code-Splitting & Performance Engine (React.lazy + Suspense)
 
 2. [📐 **`kdp_math.md`** — Core Business Logic & KDP Math Engine](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/kdp_math.md)
    * 2.1 Canvas & Page Coordinate Systems (72 pt vs 300 DPI)
    * 2.2 Paperback vs. Hardcover Cascading Matrix & Constraints
-   * 2.3 Cover Spread, Hinge ($0.394''$), Wrap ($0.591''$) & Spine Formulas
+   * 2.3 Cover Spread, Hinge ($0.394''$), Wrap ($0.591''$), Spine & Mandatory Bleed ($0.125''$) Formulas
    * 2.4 Spine Text Rules, Thresholds ($N \ge 75/79$) & Safety Margins ($0.0625''$)
 
 3. [🎨 **`rendering_engine.md`** — UI/UX Rendering & Zero-Crop Policy](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/docs/rendering_engine.md)

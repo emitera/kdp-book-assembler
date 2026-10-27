@@ -118,6 +118,15 @@ CREATE TABLE public.support_tickets (
 );
 ```
 
+### Table: `public.healthcheck` (Supabase Anti-Pause System)
+Dedicated table for scheduled REST Keep-Alive heartbeats to prevent database auto-pause.
+```sql
+CREATE TABLE IF NOT EXISTS public.healthcheck (
+    id TEXT PRIMARY KEY DEFAULT 'birdy_ping',
+    last_ping TIMESTAMPTZ DEFAULT TIMEZONE('utc'::text, NOW()) NOT NULL
+);
+```
+
 ### Row Level Security (RLS) Policies
 1. **`profiles`**:
    * `SELECT`: Authenticated users can read their own profile (`auth.uid() = id`), or `admin` can read all.
@@ -131,6 +140,8 @@ CREATE TABLE public.support_tickets (
 4. **`support_tickets`**:
    * `INSERT`: Public / Authenticated (`anon`, `authenticated`).
    * `SELECT/UPDATE`: Restricted to `admin` role or ticket owner (`auth.uid() = user_id`).
+5. **`healthcheck`**:
+   * `SELECT/INSERT/UPDATE`: Permitted for `anon` and `service_role` to enable automated GitHub Action & client keepalive pings.
 
 ---
 
@@ -150,6 +161,7 @@ sequenceDiagram
     Client->>Paddle: Paddle.Checkout.open({ items: [{ priceId, quantity: 1 }] })
     User->>Paddle: Completes Payment (Card / Apple Pay / Google Pay)
     Paddle-->>Worker: POST /api/webhooks/paddle (transaction.completed)
+    Note over Worker: Verify Paddle-Signature HMAC-SHA256
     
     Worker->>Worker: Generate Key Format: BIRDY-XXXX-XXXX-XXXX
     Worker->>DB: INSERT INTO desktop_licenses (user_id, license_key, status)
@@ -163,8 +175,71 @@ sequenceDiagram
 
 ## 1.4 Admin CRM & License Control Hub
 In the web Admin Panel ([AdminPanel.jsx](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/frontend/src/components/AdminPanel.jsx)):
-* **Add User Modal:** Create new users directly via Supabase Auth Admin API with pre-allocated credits and roles.
+* **Create User Modal (`POST /api/admin/create-user`):** Create new user accounts directly through Supabase Auth Admin API with pre-allocated credits, roles, and plan statuses.
 * **Role & Lifetime Management:** Switch user roles (`user`/`admin`) and toggle `is_lifetime_free`.
 * **Refund Policy Compensation:** Add/subtract generation credits (`+1`, `+5`, `-1`) with instant DB persistence.
 * **Manual License Generation:** Click **«🔑 Выдать ключ» (Generate Free License)** to invoke `POST /api/admin/generate-license`, creating a `BIRDY-XXXX-XXXX-XXXX` key in `desktop_licenses` and notifying the user.
 * **Instant Revocation:** Click **«🚫 Отозвать» (Revoke)** to invoke `POST /api/admin/revoke-license`, setting `status = 'revoked'` to immediately block desktop access.
+
+---
+
+## 1.5 Security Architecture, AppSec & Defense-in-Depth
+
+The backend and frontend implement strict defense-in-depth principles:
+
+### 1. Admin Authorization Middleware
+All administrative routes under `/api/admin/*` are shielded by a mandatory middleware in [backend/src/index.ts](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/backend/src/index.ts):
+```ts
+app.use('/api/admin/*', async (c, next) => {
+  const authHeader = c.req.header('Authorization');
+  const result = await verifyAdminUser(c.env, authHeader);
+  if (!result.authorized) {
+    return c.json({ error: result.error }, result.status as any);
+  }
+  await next();
+});
+```
+`verifyAdminUser` validates the Supabase session token and verifies that `profiles.role === 'admin'`. Unauthenticated or unauthorized callers receive immediate `401 Unauthorized` or `403 Forbidden` responses.
+
+### 2. Paddle Billing Webhook HMAC-SHA256 Verification
+`POST /api/webhooks/paddle` enforces cryptographic integrity:
+* Reads the raw body and parses the `Paddle-Signature` header (`ts=...;h1=...`).
+* Reconstructs the signed payload `${ts}:${rawBody}`.
+* Computes the HMAC-SHA256 digest using `PADDLE_WEBHOOK_SECRET` via native Web Crypto API (`crypto.subtle`).
+* Compares hashes using constant-time string comparison (`timingSafeEqual`) to prevent side-channel timing attacks.
+* Enforces a 5-minute replay attack window against forged past events.
+
+### 3. Edge Rate Limiting (Sliding Window)
+In-memory sliding-window rate limiters running on Cloudflare Workers edge nodes prevent brute-force and resource exhaustion:
+* **`POST /api/desktop/validate-license`**: 30 requests per minute per client IP.
+* **`POST /api/support/ticket`**: 5 requests per 10 minutes per client IP.
+
+### 4. Credential Masking & Data Leakage Prevention
+* `GET /api/admin/payment-settings` masks `paddle_api_key` (`padd_••••••••xxxx`) before returning data to client browsers.
+* `POST /api/admin/update-payment-settings` detects masked strings and prevents accidental overwrite of active credentials.
+
+---
+
+## 1.6 Supabase Anti-Idle Infrastructure (Keep-Alive)
+
+To protect the Supabase PostgreSQL database from entering auto-pause after periods of inactivity on free/starter tiers, Birdy Pages operates a dual-layer Keep-Alive mechanism:
+
+1. **Autonomous GitHub Action (`.github/workflows/supabase-keepalive.yml`):**
+   * Scheduled cron: `0 5 */2 * *` (every 2 days at 05:00 UTC) with `workflow_dispatch` trigger.
+   * Executes [scripts/supabase-keepalive.ts](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/scripts/supabase-keepalive.ts) using native `fetch`.
+   * Upserts the heartbeat record in `public.healthcheck` (`id: 'birdy_ping'`).
+   * Fallback: If `healthcheck` table is unreachable, queries `desktop_licenses` (limit 1) to guarantee REST activity.
+2. **Client-Side Opportunistic Heartbeat:**
+   * Upon web application initialization in [frontend/src/App.jsx](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/frontend/src/App.jsx), `pingSupabaseKeepAlive()` triggers an asynchronous non-blocking touch to `public.healthcheck`.
+
+---
+
+## 1.7 Frontend Code-Splitting & Performance Engine
+
+To maximize Core Web Vitals (FCP, LCP, INP), secondary application modules are dynamically imported using `React.lazy` and `Suspense`:
+* [AdminPanel.jsx](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/frontend/src/components/AdminPanel.jsx) (CRM, billing config, licenses).
+* [SupportPage.jsx](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/frontend/src/components/SupportPage.jsx) (ticket submission).
+* [DocViewer.jsx](file:///Users/evgenymendus/Documents/WebDev/kdp%20book%20assembler/frontend/src/components/DocViewer.jsx) (Terms, Refund Policy, Privacy Policy).
+
+This architecture isolates heavy components, preventing 180+ kB of non-critical JavaScript from blocking the primary book assembling dashboard.
+
